@@ -37,4 +37,7 @@ jobs:
       - name: Delete stale flights
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          # Optional: enables the cleanup_flights_run metric + WARNING+ log shipping.
+          # Reuse the same source token as the scraper so events land in one source.
+          BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
         run: python cleanup_flights.py ${{ inputs.dry_run && '--dry-run' || '' }}

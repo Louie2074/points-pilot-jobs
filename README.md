@@ -14,12 +14,19 @@ database (`md:point_pilot`).
 
 Deletes every flight older than yesterday (UTC) — keeps yesterday plus all future
 dates. Cleanup is anchored to the flight `date`, not `expires_at` (which is only a
-scrape-freshness TTL), matching the scraper's own `expire_stale_flights()`.
+scrape-freshness TTL); this logic was moved out of the scraper (now a pure write
+pipeline) into this repo.
 
 ```bash
 python cleanup_flights.py            # delete stale rows
 python cleanup_flights.py --dry-run  # report how many would be deleted, delete nothing
 ```
+
+**Observability (optional).** When `BETTERSTACK_SOURCE_TOKEN` is set, each run ships
+a `cleanup_flights_run` completion metric to Better Stack (`ok`, `deleted`,
+`duration_s`, `dry_run`) plus WARNING+ logs (failures with tracebacks), via direct
+HTTPS POST — see `obs.py`. Reuse the scraper's source token so events land in the
+same source; they're tagged `service=points-pilot-jobs`. No token → no-op.
 
 ## Setup
 
@@ -31,6 +38,12 @@ python cleanup_flights.py --dry-run  # report how many would be deleted, delete 
 
 ### GitHub Actions
 
-Add the token as a repository secret named **`MOTHERDUCK_TOKEN`**
-(Settings → Secrets and variables → Actions). The workflows also expose a manual
-**Run workflow** button (`workflow_dispatch`) with a `dry_run` toggle.
+Add these as repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `MOTHERDUCK_TOKEN` | yes | MotherDuck access (`duckdb` reads it automatically) |
+| `BETTERSTACK_SOURCE_TOKEN` | no | Enables the completion metric + log shipping; reuse the scraper's source token |
+
+The workflows also expose a manual **Run workflow** button (`workflow_dispatch`)
+with a `dry_run` toggle.
