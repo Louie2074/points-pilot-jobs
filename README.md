@@ -9,6 +9,10 @@ database (`md:point_pilot`).
 | Script | Workflow | Schedule | What it does |
 |---|---|---|---|
 | `cleanup_flights.py` | `cleanup-flights.yml` | daily 03:15 UTC | Deletes rows from `flights` whose departure `date` is older than yesterday (UTC). |
+| `transfer_bonuses.py` | `transfer-bonuses.yml` | 1st & 15th, 09:00 UTC | Scrapes current point-transfer bonuses from frequentmiler.com and snapshot-replaces the `transfer_bonuses` table. |
+
+`obs.py` is the shared Better Stack shipper used by both jobs; `conftest.py` holds
+shared pytest fixtures.
 
 ### `cleanup_flights.py`
 
@@ -27,6 +31,22 @@ a `cleanup_flights_run` completion metric to Better Stack (`ok`, `deleted`,
 `duration_s`, `dry_run`) plus WARNING+ logs (failures with tracebacks), via direct
 HTTPS POST — see `obs.py`. Reuse the scraper's source token so events land in the
 same source; they're tagged `service=points-pilot-jobs`. No token → no-op.
+
+### `transfer_bonuses.py`
+
+Scrapes the current point-transfer bonuses from frequentmiler.com and
+snapshot-replaces the `transfer_bonuses` table in MotherDuck for every airline in
+`transfer_partners`. Fail-closed: any HTTP non-2xx or parse error raises and exits
+non-zero (workflow failure). Zero active bonuses is valid — it deletes all tracked
+bonuses and inserts nothing.
+
+```bash
+python transfer_bonuses.py            # scrape + snapshot-replace
+python transfer_bonuses.py --dry-run  # fetch + parse, skip the DELETE/INSERT
+```
+
+Same observability contract as `cleanup_flights.py` (ships a completion metric +
+WARNING+ logs when `BETTERSTACK_SOURCE_TOKEN` is set).
 
 ## Setup
 

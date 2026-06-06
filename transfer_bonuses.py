@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-transfer_bonuses — scrape travel-on-points.com for current transfer bonuses.
+transfer_bonuses — scrape frequentmiler.com for current transfer bonuses.
 
 Snapshot-replaces the `transfer_bonuses` table in MotherDuck for all airlines
 tracked in `transfer_partners`. Runs on GitHub Actions cron (twice monthly) or

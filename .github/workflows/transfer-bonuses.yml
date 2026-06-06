@@ -1,6 +1,6 @@
 name: transfer-bonuses
 
-# Scrape travel-on-points.com for current transfer bonuses and snapshot-replace
+# Scrape frequentmiler.com for current transfer bonuses and snapshot-replace
 # the transfer_bonuses table in MotherDuck. Runs twice monthly; can also be
 # triggered manually (with optional dry-run mode).
 on:
