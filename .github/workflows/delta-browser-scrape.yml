@@ -1,0 +1,44 @@
+name: delta-browser-scrape
+
+# Run the nodriver Delta browser scrape from a GitHub Actions runner (Azure IPs clear Delta's
+# Akamai edge block — HTTP 200 — where Fly's IP gets 444). The scraper code lives in the
+# (private) points-pilot-scrapers repo; we check it out at the browser-scraper-base ref via a
+# read-only PAT (SCRAPER_REPO_TOKEN) and run its one-shot entrypoint. Writes Delta rows into
+# MotherDuck `flights`. Headful Chrome under xvfb (Akamai challenges headless).
+on:
+  workflow_dispatch: {}
+  # Enable a cadence once validated:
+  # schedule:
+  #   - cron: "0 */6 * * *"   # every 6h
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delta-browser-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout scraper repo @ browser-scraper-base
+        uses: actions/checkout@v4
+        with:
+          repository: Louie2074/points-pilot-scrapers
+          ref: browser-scraper-base
+          token: ${{ secrets.SCRAPER_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install scraper (incl. nodriver)
+        run: pip install -e ".[browser]"
+      - name: Scrape Delta (headful Chrome under xvfb, Azure IP)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
+        run: xvfb-run -a python scrape_delta_once.py
