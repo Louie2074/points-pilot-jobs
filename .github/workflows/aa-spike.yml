@@ -1,0 +1,35 @@
+name: aa-spike
+
+# Throwaway: does a warmed Chrome session on a GH Actions (Azure) IP get real AA award JSON
+# from the itinerary API (vs 309)? Headful Chrome under xvfb. Prints verdict + uploads capture.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: AA spike (headful Chrome under xvfb, Azure IP)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: xvfb-run -a python aa_spike.py
+      - name: Upload capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aa-spike-capture
+          path: captures/*.json
+          if-no-files-found: warn
