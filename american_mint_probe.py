@@ -177,7 +177,9 @@ async def run() -> int:
             print("[probe] => Phase B is GO: document-POST mint survives the GH-Actions IP.")
             return 0
         if data.get("blocked"):
-            print("\n[probe] ❌ AKAMAI BLOCK on Azure IP (Access-Denied / challenge on the mint nav).")
+            print(
+                "\n[probe] ❌ AKAMAI BLOCK on Azure IP (Access-Denied / challenge on the mint nav)."
+            )
         elif data.get("path", "").endswith("/booking/search") or not data.get("onChooseFlights"):
             print(
                 "\n[probe] ⚠️  Mint did not take — bounced to "

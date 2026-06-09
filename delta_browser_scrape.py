@@ -218,7 +218,11 @@ def main() -> None:
     _ping_heartbeat()
     logger.info(
         "=== done — %d Delta records upserted (routes=%d errors=%d blocked=%s) in %ss ===",
-        total, routes_scraped, error_count, blocked, duration_s,
+        total,
+        routes_scraped,
+        error_count,
+        blocked,
+        duration_s,
     )
 
 

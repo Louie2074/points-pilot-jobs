@@ -9,10 +9,13 @@ database (`md:point_pilot`).
 | Script | Workflow | Schedule | What it does |
 |---|---|---|---|
 | `cleanup_flights.py` | `cleanup-flights.yml` | daily 03:15 UTC | Deletes rows from `flights` whose departure `date` is older than yesterday (UTC). |
-| `transfer_bonuses.py` | `transfer-bonuses.yml` | 1st & 15th, 09:00 UTC | Scrapes current point-transfer bonuses from frequentmiler.com and snapshot-replaces the `transfer_bonuses` table. |
+| `transfer_bonuses.py` | `transfer-bonuses.yml` | 1st & 15th, 09:00 UTC | Scrapes current point-transfer bonuses from travel-on-points.com and snapshot-replaces the `transfer_bonuses` table. |
+| `delta_browser_scrape.py` | `delta-browser-scrape.yml` | daily 08:00 UTC + on-demand dispatch | `nodriver` browser scrape of Delta award space (Azure runner IP clears Akamai) → `flights`. |
 
-`obs.py` is the shared Better Stack shipper used by both jobs; `conftest.py` holds
-shared pytest fixtures.
+Plus two **manual-only** probe workflows (`workflow_dispatch`): `american-mint-probe.yml`
+and `gflights-probe.yml` (research tools, no schedule). `obs.py` is the shared Better Stack
+shipper used by the cleanup + transfer jobs (Delta uses the vendored `pipeline/obs.py`);
+`conftest.py` holds shared pytest fixtures.
 
 ### `cleanup_flights.py`
 
@@ -34,7 +37,7 @@ same source; they're tagged `service=points-pilot-jobs`. No token → no-op.
 
 ### `transfer_bonuses.py`
 
-Scrapes the current point-transfer bonuses from frequentmiler.com and
+Scrapes the current point-transfer bonuses from travel-on-points.com and
 snapshot-replaces the `transfer_bonuses` table in MotherDuck for every airline in
 `transfer_partners`. Fail-closed: any HTTP non-2xx or parse error raises and exits
 non-zero (workflow failure). Zero active bonuses is valid — it deletes all tracked
@@ -64,6 +67,9 @@ Add these as repository secrets (Settings → Secrets and variables → Actions)
 |---|---|---|
 | `MOTHERDUCK_TOKEN` | yes | MotherDuck access (`duckdb` reads it automatically) |
 | `BETTERSTACK_SOURCE_TOKEN` | no | Enables the completion metric + log shipping; reuse the scraper's source token |
+| `CLEANUP_HEARTBEAT_URL` | no | Better Stack heartbeat — a missed/failed daily cleanup then alerts |
+| `BONUSES_HEARTBEAT_URL` | no | Better Stack heartbeat for the transfer-bonuses run |
+| `DELTA_HEARTBEAT_URL` | no | Better Stack heartbeat for the daily Delta browser scrape |
 
 The workflows also expose a manual **Run workflow** button (`workflow_dispatch`)
 with a `dry_run` toggle.

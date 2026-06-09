@@ -67,14 +67,15 @@ TODAY = date(2026, 6, 6)
 # parse_bonuses tests
 # ---------------------------------------------------------------------------
 
+
 def test_parse_valid_bonus():
     """American Express → Air France: pct, dates, and notes parsed correctly."""
     records = parse_bonuses(HTML_FIXTURE, today=TODAY)
     amex_af = next((r for r in records if r["airline_code"] == "AF"), None)
     assert amex_af is not None
-    assert amex_af["bank_program_id"] == 2       # American Express
+    assert amex_af["bank_program_id"] == 2  # American Express
     assert amex_af["bonus_pct"] == 25
-    assert amex_af["starts_at"] == TODAY          # starts_at always = today on this site
+    assert amex_af["starts_at"] == TODAY  # starts_at always = today on this site
     assert amex_af["ends_at"] == date(2026, 6, 30)
     assert amex_af["notes"] is None
 
@@ -84,7 +85,7 @@ def test_parse_asterisk_stripped_into_notes():
     records = parse_bonuses(HTML_FIXTURE, today=TODAY)
     jetblue = next((r for r in records if r["airline_code"] == "B6"), None)
     assert jetblue is not None
-    assert jetblue["bank_program_id"] == 1        # Chase
+    assert jetblue["bank_program_id"] == 1  # Chase
     assert jetblue["bonus_pct"] == 30
     assert jetblue["ends_at"] == date(2026, 7, 15)
     # Raw cell "JetBlue TrueBlue*" stored in notes because it was altered
@@ -127,6 +128,7 @@ def test_parse_no_table_raises():
 # ---------------------------------------------------------------------------
 # reconcile tests — in-memory DuckDB, no MotherDuck needed
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def mem_conn():
@@ -171,14 +173,16 @@ def test_reconcile_replaces_existing(mem_conn):
     )
     assert mem_conn.execute("SELECT COUNT(*) FROM transfer_bonuses").fetchone()[0] == 1
 
-    fresh = [{
-        "bank_program_id": 2,       # Amex
-        "airline_code": "AF",
-        "bonus_pct": 25,
-        "starts_at": date(2026, 6, 6),
-        "ends_at": date(2026, 6, 30),
-        "notes": None,
-    }]
+    fresh = [
+        {
+            "bank_program_id": 2,  # Amex
+            "airline_code": "AF",
+            "bonus_pct": 25,
+            "starts_at": date(2026, 6, 6),
+            "ends_at": date(2026, 6, 30),
+            "notes": None,
+        }
+    ]
     deleted, inserted = reconcile(mem_conn, fresh)
     assert deleted == 1
     assert inserted == 1
@@ -208,10 +212,16 @@ def test_reconcile_dry_run_leaves_table_unchanged(mem_conn):
         "(bank_program_id, airline_code, bonus_pct, starts_at, ends_at) "
         "VALUES (5, 'AS', 30, '2026-01-01', '2026-01-31')"
     )
-    fresh = [{
-        "bank_program_id": 2, "airline_code": "AF", "bonus_pct": 25,
-        "starts_at": date(2026, 6, 6), "ends_at": date(2026, 6, 30), "notes": None,
-    }]
+    fresh = [
+        {
+            "bank_program_id": 2,
+            "airline_code": "AF",
+            "bonus_pct": 25,
+            "starts_at": date(2026, 6, 6),
+            "ends_at": date(2026, 6, 30),
+            "notes": None,
+        }
+    ]
     deleted, inserted = reconcile(mem_conn, fresh, dry_run=True)
     assert (deleted, inserted) == (0, 0)
     # Table unchanged — stale AS bonus still present

@@ -46,6 +46,7 @@ def _ping_heartbeat() -> None:
     except Exception as exc:  # noqa: BLE001 — monitoring must never break the run
         logger.warning("heartbeat ping failed: %s", exc)
 
+
 SOURCE_URL = "https://travel-on-points.com/current-point-transfer-bonuses/"
 
 # Site's "Transfer From" cell text → bank_programs.id in MotherDuck.
@@ -77,7 +78,7 @@ AIRLINE_MAP: dict[str, str] = {
     "air canada aeroplan": "AC",
     "aeroplan": "AC",
     "air france/klm flying blue": "AF",
-    "air france klm flying blue": "AF",   # frequentmiler omits the slash
+    "air france klm flying blue": "AF",  # frequentmiler omits the slash
     "air france": "AF",
     "flying blue": "AF",
     "alaska airlines": "AS",
@@ -103,7 +104,7 @@ AIRLINE_MAP: dict[str, str] = {
     "ana": "NH",
     "all nippon airways": "NH",
     "qatar airways": "QR",
-    "qatar privilege club avios": "QR",   # frequentmiler uses this name
+    "qatar privilege club avios": "QR",  # frequentmiler uses this name
     "singapore airlines krisflyer": "SQ",
     "singapore airlines": "SQ",
     "krisflyer": "SQ",
@@ -151,9 +152,7 @@ def parse_bonuses(html: str, today: date | None = None) -> list[dict]:
         cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
         if len(cells) < 4:
             continue
-        bank_raw, bonus_raw, airline_raw, end_date_raw = (
-            cells[0], cells[1], cells[2], cells[3]
-        )
+        bank_raw, bonus_raw, airline_raw, end_date_raw = (cells[0], cells[1], cells[2], cells[3])
 
         # Bank lookup
         bank_id = BANK_MAP.get(bank_raw.lower().strip())
@@ -185,14 +184,16 @@ def parse_bonuses(html: str, today: date | None = None) -> list[dict]:
         # Store original cell text in notes if it was altered (e.g. trailing *)
         notes: str | None = airline_raw if airline_raw != airline_clean else None
 
-        records.append({
-            "bank_program_id": bank_id,
-            "airline_code": airline_code,
-            "bonus_pct": bonus_pct,
-            "starts_at": today,
-            "ends_at": ends_at,
-            "notes": notes,
-        })
+        records.append(
+            {
+                "bank_program_id": bank_id,
+                "airline_code": airline_code,
+                "bonus_pct": bonus_pct,
+                "starts_at": today,
+                "ends_at": ends_at,
+                "notes": notes,
+            }
+        )
 
     return records
 
@@ -216,7 +217,8 @@ def reconcile(
         ).fetchone()[0]
         logger.info(
             "[dry-run] Would delete %d row(s) and insert %d row(s).",
-            count, len(records),
+            count,
+            len(records),
         )
         return 0, 0
 
@@ -236,8 +238,12 @@ def reconcile(
             """,
             [
                 (
-                    r["bank_program_id"], r["airline_code"], r["bonus_pct"],
-                    r["starts_at"], r["ends_at"], r["notes"],
+                    r["bank_program_id"],
+                    r["airline_code"],
+                    r["bonus_pct"],
+                    r["starts_at"],
+                    r["ends_at"],
+                    r["notes"],
                 )
                 for r in records
             ],
@@ -251,6 +257,7 @@ def reconcile(
 def _find_chrome() -> str:
     """Return path to Chrome/Chromium binary, searching common locations."""
     import shutil
+
     candidates = [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",  # macOS
         "/usr/bin/google-chrome-stable",  # GHA ubuntu-latest after setup-chrome
@@ -351,16 +358,18 @@ def main() -> int:
         logger.exception("transfer_bonuses failed")
         return 1
     finally:
-        ship_metric({
-            "event": "transfer_bonuses_run",
-            "service": "points-pilot-jobs",
-            "job": "transfer_bonuses",
-            "ok": ok,
-            "deleted": deleted,
-            "inserted": inserted,
-            "dry_run": args.dry_run,
-            "duration_s": round(time.monotonic() - started, 3),
-        })
+        ship_metric(
+            {
+                "event": "transfer_bonuses_run",
+                "service": "points-pilot-jobs",
+                "job": "transfer_bonuses",
+                "ok": ok,
+                "deleted": deleted,
+                "inserted": inserted,
+                "dry_run": args.dry_run,
+                "duration_s": round(time.monotonic() - started, 3),
+            }
+        )
         flush()
         # Heartbeat only on a successful real run (dry-runs are manual).
         if ok and not args.dry_run:

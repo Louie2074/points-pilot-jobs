@@ -46,6 +46,7 @@ def _ping_heartbeat() -> None:
     except Exception as exc:  # noqa: BLE001 — monitoring must never break the run
         logger.warning("heartbeat ping failed: %s", exc)
 
+
 logger = logging.getLogger("cleanup_flights")
 
 # Strictly older than yesterday (UTC). `current_date - INTERVAL '1 day'` is

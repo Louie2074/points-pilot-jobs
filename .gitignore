@@ -5,6 +5,8 @@
 # Python
 __pycache__/
 *.py[cod]
+.ruff_cache/
+.pytest_cache/
 .venv/
 venv/
 

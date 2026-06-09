@@ -96,7 +96,7 @@ async def run() -> int:
         await tab.sleep(3)
 
         # Try to dismiss a consent interstitial if present.
-        for sel in ['button[aria-label*="Accept"]', 'button[aria-label*="agree"]', 'form button']:
+        for sel in ['button[aria-label*="Accept"]', 'button[aria-label*="agree"]', "form button"]:
             try:
                 btn = await tab.select(sel, timeout=2)
                 if btn:
