@@ -19,21 +19,21 @@ Requires MOTHERDUCK_TOKEN. BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping
 
 from __future__ import annotations
 
-import argparse  # noqa: F401 — used in main()
-import asyncio  # noqa: F401 — used in fetch_page()
+import argparse
+import asyncio
 import logging
 import os
 import re
-import subprocess  # noqa: F401 — used in _fetch_with_nodriver()
-import time  # noqa: F401 — used in main()
-import urllib.request  # noqa: F401 — used in _ping_heartbeat()
+import subprocess
+import time
+import urllib.request
 from decimal import ROUND_HALF_UP, Decimal
 
 import duckdb
-import nodriver as uc  # noqa: F401 — used in _fetch_with_nodriver()
+import nodriver as uc
 from bs4 import BeautifulSoup
 
-from obs import flush, install_log_shipping, ship_metric  # noqa: F401 — used in main()
+from obs import flush, install_log_shipping, ship_metric
 
 logger = logging.getLogger("transfer_partners")
 
