@@ -1,0 +1,55 @@
+name: southwest-browser-scrape
+
+# Southwest browser scrape, run entirely within this repo (GH Actions / Azure IP mints a valid
+# F5/Shape sensor token where Fly's IP would be blocked). scrapers/ config/ db/ pipeline/ are
+# vendored; scrapers/browser.py + scrapers/southwest.py are canonical here. Headful Chrome under
+# xvfb (Shape/Akamai score headless harshly). Writes Southwest rows into MotherDuck `flights`.
+on:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: "Origin IATA (single-route on-demand mode). Blank = popular-routes cron."
+        required: false
+        default: ""
+      destination:
+        description: "Destination IATA (single-route on-demand mode)."
+        required: false
+        default: ""
+      dates:
+        description: "Comma-separated ISO dates (YYYY-MM-DD). Blank = near-term window."
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 9 * * *"   # daily 09:00 UTC, staggered after the Delta scrape (08:00 UTC)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ inputs.origin != '' && format('southwest-ondemand-{0}-{1}', inputs.origin, inputs.destination) || 'southwest-browser-scrape' }}
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Scrape Southwest (headful Chrome under xvfb, Azure IP)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
+          SOUTHWEST_HEARTBEAT_URL: ${{ secrets.SOUTHWEST_HEARTBEAT_URL }}
+          SOUTHWEST_SCRAPE_DAYS: "5"
+          SOUTHWEST_ROUTE_ORIGIN: ${{ inputs.origin }}
+          SOUTHWEST_ROUTE_DEST: ${{ inputs.destination }}
+          SOUTHWEST_ROUTE_DATES: ${{ inputs.dates }}
+        run: xvfb-run -a python southwest_browser_scrape.py
