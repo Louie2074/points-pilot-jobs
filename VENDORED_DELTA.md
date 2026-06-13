@@ -16,8 +16,8 @@ column as UTC, shifting every time by the airport's offset). Re-sync if it chang
 Better Stack log shipping + a `scrape_run` metric (service `point-pilot-delta`) at parity with the
 Alaska/JetBlue + Google Flights scrapers. Re-sync if it changes upstream.
 
-**`scrapers/browser.py` + `scrapers/delta.py` are CANONICAL HERE** — the Delta browser scraper
-was moved out of points-pilot-scrapers into this repo (the scraper repo no longer carries Delta).
+**`scrapers/browser.py`, `scrapers/delta.py`, and `scrapers/southwest.py` are CANONICAL HERE** — the Delta
+and Southwest browser scrapers are maintained in this repo (the scraper repo no longer carries these).
 The other files (`base.py`, `config/settings.py`, `db/*`, `pipeline/normalizer.py`) are copies of
 **points-pilot-scrapers** shared modules — those stay canonical in the scraper repo (Alaska/JetBlue
 use them), so re-sync them here if they change upstream. Editing the shared copies without
