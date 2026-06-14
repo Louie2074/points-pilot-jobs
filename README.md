@@ -13,8 +13,7 @@ database (`md:point_pilot`).
 | `transfer_partners.py` | `transfer-partners.yml` | 1st & 15th, 10:00 UTC | Scrapes bank→airline transfer partners + ratios from thriftytraveler.com and full-table snapshot-replaces the `transfer_partners` table (sole owner). |
 | `delta_browser_scrape.py` | `delta-browser-scrape.yml` | daily 08:00 UTC + on-demand dispatch | `nodriver` browser scrape of Delta award space (Azure runner IP clears Akamai) → `flights`. |
 
-Plus a **manual-only** probe workflow (`workflow_dispatch`): `gflights-probe.yml` (research
-tool, no schedule). `obs.py` is the shared Better Stack
+`obs.py` is the shared Better Stack
 shipper used by the cleanup + transfer jobs (Delta uses the vendored `pipeline/obs.py`);
 `conftest.py` holds shared pytest fixtures.
 

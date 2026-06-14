@@ -7,8 +7,3 @@ target-version = "py311"
 [lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["UP017", "UP037"]
-
-# The gflights research probe embeds a long JS-regex string literal (can't be
-# line-wrapped) — scope E501 off it rather than mangling the embedded JS.
-[lint.per-file-ignores]
-"gflights_probe.py" = ["E501"]
