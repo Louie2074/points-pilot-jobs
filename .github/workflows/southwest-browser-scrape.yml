@@ -32,7 +32,10 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    # 22 routes × both directions: Southwest's F5/Shape per-request sensor makes it
+    # the slowest scrape, and the old 75-min cap cancelled a full run mid-flight.
+    # This is a ceiling, not the runtime — typical runs finish well under it.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
