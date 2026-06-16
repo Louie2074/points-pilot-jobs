@@ -22,8 +22,9 @@ from BrowserScraper; this class only builds the request and maps the response to
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import uuid
+import random
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -119,51 +120,52 @@ class TurkishScraper(BrowserScraper):
             asyncio.set_event_loop(self._loop)
         return self._loop
 
-    def _build_body(self, origin: str, dest: str, travel_date: date, cabin_api: str) -> dict:
-        """Minimal award-availability request — airport codes + date are all the API needs."""
-        return {
-            "selectedBookerSearch": "O",  # one-way
-            "selectedCabinClass": cabin_api,
-            "moduleType": "AWARD",  # <-- the miles/award flag
-            "passengerTypeList": [{"quantity": 1, "code": "ADULT"}],
-            "originDestinationInformationList": [
-                {
-                    "originAirportCode": origin.upper(),
-                    "destinationAirportCode": dest.upper(),
-                    "departureDate": travel_date.strftime("%d-%m-%Y"),
-                }
-            ],
-            "savedDate": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        }
-
-    async def _fetch_availability(self, body: dict) -> dict:
-        """One availability POST, retrying through PerimeterX 428 crypto-challenges (PX auto-solves
-        in the background, so a short wait + retry returns data). Fresh UUID session headers per
-        attempt; accept/content-type are added by _page_fetch."""
-        resp: dict = {}
-        for attempt in range(self._px_retries + 1):
-            headers = {
-                "Accept-Language": "en",
-                "X-clientId": str(uuid.uuid4()),
-                "X-requestId": str(uuid.uuid4()),
-                "X-country": "us",
-                "X-platform": "WEB",
-                "X-conversationId": str(uuid.uuid4()),
-            }
-            resp = await self._page_fetch(_API_URL, body, headers)
-            if not (isinstance(resp, dict) and "sec-cp-challenge" in resp):
-                return resp  # got the API response (data or empty) — not a PX challenge
-            logger.info("[TK] PerimeterX 428 challenge (attempt %d) — waiting for solve", attempt + 1)
-            await asyncio.sleep(self._px_wait_s)
-        return resp  # still challenged after retries — soft-empty
+    def _build_js(self, origin: str, dest: str, travel_date: date) -> str:
+        """One self-contained in-page async script that fetches BOTH cabins' availability and
+        retries PerimeterX 428 challenges — all inside the browser. Doing it in a single
+        tab.evaluate keeps it to ONE CDP op per scrape: nodriver 0.50.3 + websockets 16.0 trip
+        "cannot call get() concurrently" when several CDP ops run within one scrape, so we
+        consolidate (and the session UUIDs / PX-solve all happen browser-side, which is faster)."""
+        cabins = [api for api, _ in _CABINS]
+        date_str = travel_date.strftime("%d-%m-%Y")
+        return (
+            "(async () => {"
+            f"  const URL={json.dumps(_API_URL)}, CABINS={json.dumps(cabins)};"
+            f"  const O={json.dumps(origin.upper())}, D={json.dumps(dest.upper())}, DT={json.dumps(date_str)};"
+            f"  const RETRIES={self._px_retries}, WAIT={int(self._px_wait_s * 1000)};"
+            "   const uuid=()=>crypto.randomUUID();"
+            "   const sleep=ms=>new Promise(r=>setTimeout(r,ms));"
+            "   const hdrs=()=>({'Accept':'application/json','Content-Type':'application/json',"
+            "     'Accept-Language':'en','X-clientId':uuid(),'X-requestId':uuid(),'X-country':'us',"
+            "     'X-platform':'WEB','X-conversationId':uuid()});"
+            "   const body=(c)=>({selectedBookerSearch:'O',selectedCabinClass:c,moduleType:'AWARD',"
+            "     passengerTypeList:[{quantity:1,code:'ADULT'}],originDestinationInformationList:"
+            "     [{originAirportCode:O,destinationAirportCode:D,departureDate:DT}],"
+            "     savedDate:new Date().toISOString()});"
+            "   async function getCabin(c){for(let i=0;i<=RETRIES;i++){let r,t;"
+            "     try{r=await fetch(URL,{method:'POST',headers:hdrs(),body:JSON.stringify(body(c)),"
+            "       credentials:'include'});t=await r.text();}catch(e){return null;}"
+            "     if(r.status===428||t.indexOf('sec-cp-challenge')>=0){await sleep(WAIT);continue;}"
+            "     try{return JSON.parse(t);}catch(e){return null;}}return null;}"
+            "   const out={};"
+            "   for(const c of CABINS){out[c.toLowerCase()]=await getCabin(c);await sleep(1000);}"
+            "   return JSON.stringify(out);"
+            "})()"
+        )
 
     async def fetch_raw(self, origin: str, dest: str, travel_date: date) -> dict:
-        """One in-page availability POST per cabin (Economy, Business) in the warmed session."""
-        out: dict[str, dict] = {}
-        for cabin_api, cabin in _CABINS:
-            body = self._build_body(origin, dest, travel_date, cabin_api)
-            out[cabin] = await self._fetch_availability(body)
-        return out
+        """Run the consolidated availability script as ONE in-page evaluate in the warmed session.
+        Returns {"economy": <resp|None>, "business": <resp|None>} ({} on transport failure)."""
+        tab = await self._ensure_browser()
+        await asyncio.sleep(random.uniform(self.min_delay_s, self.min_delay_s * 2))  # pacing
+        out = await tab.evaluate(self._build_js(origin, dest, travel_date), await_promise=True)
+        if not isinstance(out, str):
+            logger.warning("[TK] in-page evaluate returned non-str (JS error?): %r", out)
+            return {}
+        try:
+            return json.loads(out)
+        except (ValueError, TypeError):
+            return {}
 
     def normalize(
         self, raw: dict, origin: str, dest: str, travel_date: date
