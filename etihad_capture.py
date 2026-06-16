@@ -40,10 +40,18 @@ DEEPLINK = (
     "&WDS_ENABLE_MILES_TOGGLE=TRUE&FLOW=AWARD"
 )
 
-# Full-fidelity interceptor: capture request headers + body and the COMPLETE response text.
+# Full-fidelity interceptor with sessionStorage persistence — the Amadeus award flow top-navigates
+# (/book/search → /book/cart-new/upsell), which resets an in-memory array, so we persist captures
+# in sessionStorage (same-origin across the whole digital.etihad.com nav chain) and read it at the
+# end. Captures request headers + body and the COMPLETE response text (body capped to keep under
+# the sessionStorage quota).
 INTERCEPT = r"""
-(()=>{ if(window.__cap)return 'already'; window.__cap=[];
-  const push=o=>{try{if(window.__cap.length<1200)window.__cap.push(o);}catch(e){}};
+(()=>{ const KEY='__ppcap';
+  try{ window.__cap = JSON.parse(sessionStorage.getItem(KEY)||'[]'); }catch(e){ window.__cap=[]; }
+  if(window.__ppPatched) return 'already'; window.__ppPatched=true;
+  const save=()=>{try{sessionStorage.setItem(KEY, JSON.stringify(window.__cap));}catch(e){}};
+  const push=o=>{try{ if((o.b||'').length>300000) o.b=o.b.slice(0,300000)+'…[trunc]';
+    if(window.__cap.length<400){window.__cap.push(o);save();}}catch(e){}};
   const hdrs=hh=>{const r={};try{if(!hh)return r;
     if(hh.forEach){hh.forEach((v,k)=>r[k]=v);} else if(Array.isArray(hh)){hh.forEach(p=>r[p[0]]=p[1]);}
     else {for(const k in hh)r[k]=hh[k];}}catch(e){}return r;};
@@ -368,10 +376,20 @@ async def main():
         except Exception:
             pass
         try:
-            raw = await tab.evaluate("JSON.stringify(window.__cap||[])", await_promise=False)
+            raw = await tab.evaluate("sessionStorage.getItem('__ppcap')||'[]'", await_promise=False)
             cap = json.loads(raw) if isinstance(raw, str) else []
         except Exception as e:
             print("cap_read_err", str(e)[:80], flush=True)
+        # DOM pricing as a backup signal (proves the page rendered award fares even if the XHR
+        # capture misses): every "Miles 83,625 + USD 225" token on the results page.
+        try:
+            dom = await tab.evaluate(
+                "JSON.stringify([...document.querySelectorAll('*')].map(e=>e.textContent||'')"
+                ".filter(t=>/Miles[\\s\\S]{0,4}[0-9]/.test(t)&&t.length<60).slice(0,30))"
+            )
+            print(f"DOM_PRICES: {dom}", flush=True)
+        except Exception:
+            pass
         try:
             await tab.save_screenshot("etihad_capture.png")
         except Exception:
