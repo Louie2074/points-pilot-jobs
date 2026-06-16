@@ -211,6 +211,29 @@ async def _kill_overlays(tab):
         print(f"[NOTIF] err {str(e)[:60]}", flush=True)
 
 
+async def _fill_tap(tab, ph_kw, city, code):
+    """Focus a TAP cmdk combobox by placeholder keyword (origin/destination), type the city, then
+    real-click the role=option matching the IATA code."""
+    await tab.evaluate(
+        "(()=>{const e=[...document.querySelectorAll('input[placeholder]')]"
+        ".find(x=>x.offsetParent&&(x.placeholder||'').toLowerCase().includes('" + ph_kw + "'));"
+        "if(e){e.scrollIntoView({block:'center'});e.focus();e.click();}return !!e;})()"
+    )
+    await tab.sleep(0.8)
+    await type_focused(tab, city)
+    await tab.sleep(3)
+    opts = await tab.evaluate(
+        "JSON.stringify([...document.querySelectorAll('[role=option]')].filter(e=>e.offsetParent)"
+        ".map(e=>(e.textContent||'').replace(/\\s+/g,' ').trim()).slice(0,6))"
+    )
+    print(f"[TP OPTS {ph_kw} {code}] {str(opts)[:240]}", flush=True)
+    await _real_click(tab,
+        "[...document.querySelectorAll('[role=option]')]"
+        ".find(e=>e.offsetParent&&(e.textContent||'').toUpperCase().includes('" + code.upper() + "'))",
+        f"pick-{code}")
+    await tab.sleep(1.4)
+
+
 async def _real_click(tab, find_expr, label, is_fn=False):
     """Find an element via a JS expression, scroll it into view, and dispatch a REAL CDP mouse
     click at its center (synthetic .click() often won't open date pickers / submit redibe-style
@@ -369,49 +392,58 @@ async def drive_tap(tab):
         "return JSON.stringify([...new Set(ctrls)].slice(0,16));})()"
     )
     print(f"[TP CTRLS] {str(inv)[:900]}", flush=True)
-    await click_exact(tab, "one way", "one-way")
-    await tab.sleep(1)
+    # one-way (tripType-option buttons)
+    await _real_click(tab,
+        "[...document.querySelectorAll('button[id^=tripType-option],[role=radio],button')]"
+        ".find(e=>e.offsetParent&&/^\\s*one.?way\\s*$/i.test((e.textContent||'')+(e.getAttribute('aria-label')||'')))",
+        "oneway")
+    await tab.sleep(1.2)
     await _tp_state(tab, "after-oneway")
-    await fill_airport(tab, ["origin", "from", "leaving from", "where from", "select origin"],
-                       ORIGIN_CITY, ORIGIN_CODE)
-    await fill_airport(tab, ["destination", "to", "going to", "flying to", "where to", "select destination"],
-                       DEST_CITY, DEST_CODE)
+    await _fill_tap(tab, "origin", ORIGIN_CITY, ORIGIN_CODE)
+    await _fill_tap(tab, "destination", DEST_CITY, DEST_CODE)
     await _tp_state(tab, "after-airports")
-    # date: open the Departure field with a REAL CDP click (synthetic clicks often don't open the
-    # picker), dump the calendar, then real-click a future day cell.
+    # date: real-click "Select Dates" (opens a calendar), then real-click a mid-July day
     await _real_click(tab,
-        "[...document.querySelectorAll('input,[role=button],[role=combobox],button,div')]"
-        ".find(e=>e.offsetParent&&/departure|depart|select date|when|outbound/i.test"
-        "((e.getAttribute('aria-label')||'')+(e.placeholder||'')+(e.textContent||'').slice(0,30)))",
-        "departure-field")
-    await tab.sleep(2)
+        "[...document.querySelectorAll('button,[role=button]')]"
+        ".find(e=>e.offsetParent&&/select dates|open calendar|departure|choose date/i.test"
+        "((e.textContent||'')+(e.getAttribute('aria-label')||'')))",
+        "select-dates")
+    await tab.sleep(2.2)
     cal = await tab.evaluate(
-        "(()=>{const c=[...document.querySelectorAll('[class*=calendar],[class*=datepicker],[role=grid],[class*=month]')].find(e=>e.offsetParent);"
-        "return c?c.outerHTML.slice(0,500):'no-calendar';})()"
+        "(()=>{const c=[...document.querySelectorAll('[role=dialog],[class*=calendar],[class*=Calendar],[role=grid],[class*=datepicker],[class*=DayPicker]')].find(e=>e.offsetParent);"
+        "return c?(c.className+' :: '+c.outerHTML.slice(0,400)):'no-calendar';})()"
     )
-    print(f"[CALENDAR] {str(cal)[:500]}", flush=True)
+    print(f"[CALENDAR] {str(cal)[:520]}", flush=True)
     await _real_click(tab,
-        "(()=>{const cells=[...document.querySelectorAll('td,[role=gridcell],[class*=day],button,span,div')]"
-        ".filter(e=>e.offsetParent&&/^\\s*\\d{1,2}\\s*$/.test(e.textContent||'')"
-        "&&!/disabled|past|--disabled/i.test((e.className||'')+(e.getAttribute('aria-disabled')||''))"
-        "&&e.getAttribute('aria-disabled')!=='true');"
-        "return cells.find(e=>e.textContent.trim()==='" + FUTURE_DAY + "')||cells.find(e=>+e.textContent.trim()>=22)||cells[cells.length-1];})()",
-        "day-cell", is_fn=True)
-    await tab.sleep(1)
-    await click_exact(tab, "confirm", "ok", "done", "apply", "select", "accept")
+        "[...document.querySelectorAll('button[aria-label],[role=gridcell],td,button')]"
+        ".find(e=>e.offsetParent&&!e.disabled&&e.getAttribute('aria-disabled')!=='true'"
+        "&&(/\\b(Jul|July)\\b[^0-9]{0,6}(1[5-9]|2[0-5])\\b|\\b(1[5-9]|2[0-5])\\b[^0-9]{0,6}(Jul|July)\\b/i.test(e.getAttribute('aria-label')||'')"
+        "||(e.textContent||'').trim()==='" + FUTURE_DAY + "'))",
+        "day-cell")
+    await tab.sleep(1.2)
+    await click_exact(tab, "done", "apply", "confirm", "ok", "select dates")
     await _tp_state(tab, "after-date")
-    # search (the LifeMiles CTA is "Smart Search")
+    # search
     await _real_click(tab,
         "[...document.querySelectorAll('button,[role=button],input[type=submit]')]"
-        ".find(e=>e.offsetParent&&/smart search|search flights|^\\s*search/i.test"
-        "((e.textContent||'')+(e.getAttribute('aria-label')||'')+(e.value||'')))",
+        ".find(e=>e.offsetParent&&/^\\s*search\\s*$/i.test((e.textContent||'')+(e.value||''))&&!e.closest('nav,header'))",
         "search-btn")
-    await tab.sleep(26)  # availability render / API
-    # detect login-gating vs results
+    await tab.sleep(28)
     where = await tab.evaluate(
-        "JSON.stringify({url:location.href.slice(0,80),sso:/sso\\.flytap|openid-connect|\\/auth\\/|login/i.test(location.href)})"
+        "JSON.stringify({host:location.host,path:location.pathname.slice(0,45),"
+        "sso:/login|signin|\\/auth|account|identity/i.test(location.href),"
+        "bodyLen:document.body?document.body.innerText.length:0,"
+        "snip:(document.body?document.body.innerText:'').replace(/[0-9]/g,'#').slice(0,160)})"
     )
     print(f"[AFTER SEARCH] {where}", flush=True)
+    try:
+        html = await tab.evaluate("document.documentElement.outerHTML")
+        if isinstance(html, str):
+            with open('cap_tap_results.html', 'w') as fh:
+                fh.write(html[:4000000])
+            print(f"RESULTS_HTML saved ({len(html)} chars)", flush=True)
+    except Exception:
+        pass
     await diag(tab, "03results")
 
 # --------------------------------------------------------------- post-processing
