@@ -227,13 +227,13 @@ async def _fill_vs_airport(tab, label, city, code):
         ".map(e=>(e.textContent||'').replace(/\\s+/g,' ').trim()).slice(0,8))"
     )
     print(f"[VS OPTS {label} {code}] {str(opts)[:280]}", flush=True)
-    picked = await tab.evaluate(
-        "(()=>{const o=[...document.querySelectorAll('[role=option],li,[class*=suggestion],[id*=option],button,a')]"
-        ".find(e=>e.offsetParent&&(e.textContent||'').toUpperCase().includes('" + code.upper() + "'));"
-        "if(o){o.scrollIntoView({block:'center'});o.click();return 'picked:'+o.textContent.replace(/\\s+/g,' ').trim().slice(0,40);}return 'noopt';})()"
-    )
-    print(f"[VS PICK {label} {code}] {picked}", flush=True)
-    await tab.sleep(1.2)
+    # commit the selection with a REAL CDP click (synthetic .click() doesn't fire Virgin's React
+    # select handler, so the field clears on blur)
+    await _real_click(tab,
+        "[...document.querySelectorAll('[role=option],li,[class*=suggestion],[id*=option],button,a')]"
+        ".find(e=>e.offsetParent&&(e.textContent||'').toUpperCase().includes('(" + code.upper() + ")'))",
+        f"pick-{code}")
+    await tab.sleep(1.4)
 
 
 async def _real_click(tab, find_expr, label, is_fn=False):
@@ -413,12 +413,16 @@ async def drive_virgin(tab):
     await tab.sleep(1)
     await click_exact(tab, "search for flights", "search dates", "done", "apply", "confirm")
     await _vs_state(tab, "after-date")
-    # search
+    # search — target the FORM's submit button (the header nav also says "Search flights"; exclude
+    # header/nav and prefer a button below the top of the page / type=submit)
     await _real_click(tab,
-        "[...document.querySelectorAll('button,[role=button],input[type=submit]')]"
-        ".find(e=>e.offsetParent&&/search flights|search for reward|^\\s*search/i.test"
-        "((e.textContent||'')+(e.getAttribute('aria-label')||'')+(e.value||'')))",
-        "search-btn")
+        "(()=>{const bs=[...document.querySelectorAll('button,input[type=submit],[role=button]')]"
+        ".filter(e=>e.offsetParent&&/search flights|search for reward|^\\s*search\\b/i.test"
+        "((e.textContent||'')+(e.getAttribute('aria-label')||'')+(e.value||''))"
+        "&&!e.closest('header,nav,[role=banner],[role=navigation]'));"
+        "bs.sort((a,b)=>(b.type==='submit')-(a.type==='submit')||b.getBoundingClientRect().top-a.getBoundingClientRect().top);"
+        "return bs[0];})()",
+        "form-search-btn")
     await tab.sleep(28)  # availability render / API (/travelplus/search-panel-api)
     where = await tab.evaluate(
         "JSON.stringify({url:location.href.slice(0,90),sso:/openid-connect|\\/auth\\/|signin|login/i.test(location.href)})"
