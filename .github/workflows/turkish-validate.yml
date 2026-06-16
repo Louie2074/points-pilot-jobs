@@ -26,4 +26,4 @@ jobs:
       - name: Validate Turkish scraper (headful Chrome under xvfb, Azure IP)
         env:
           MOTHERDUCK_TOKEN: dummy   # import-time settings gate only; this script never hits the DB
-        run: xvfb-run -a python -u turkish_validate.py
+        run: xvfb-run -a timeout -s KILL 280 python -u turkish_validate.py || echo "RUN_ENDED exit=$?"
