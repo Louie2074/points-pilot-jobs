@@ -36,5 +36,6 @@ jobs:
             cap_cathay_net.json
             cap_cathay_results.html
             cap_cathay_widget.html
+            cap_cathay_calendar.html
             cathay_*.png
           if-no-files-found: ignore

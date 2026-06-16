@@ -217,8 +217,13 @@ async def drive_cathay(tab):
             print(f"WIDGET_HTML saved ({len(wh)} chars)", flush=True)
     except Exception as e:
         print(f"WIDGET_DUMP_ERR {type(e).__name__}: {str(e)[:80]}", flush=True)
-    await click_exact(tab, "one way", "one-way")
-    await tab.sleep(1)
+    # switch to the one-way redibe tab (default is round-trip 'rt'); needs only one date
+    ow = await tab.evaluate(
+        "(()=>{const t=[...document.querySelectorAll('[role=tab]')].find(e=>/one.?way/i.test(e.textContent||''));"
+        "if(t){t.scrollIntoView({block:'center'});t.click();return 'ow:'+(t.id||t.textContent.trim().slice(0,20));}return 'no-ow-tab';})()"
+    )
+    print(f"[ONEWAY TAB] {ow}", flush=True)
+    await tab.sleep(1.5)
     # From is the 1st redibe text input, Going to the 2nd (ids carry random suffixes)
     ids = await tab.evaluate(
         "JSON.stringify([...document.querySelectorAll('input[id^=redibe-v3-text]')].map(e=>e.id))"
@@ -235,24 +240,50 @@ async def drive_cathay(tab):
         await fill_airport(tab, ["from", "leaving from"], ORIGIN_CITY, ORIGIN_CODE)
         await fill_airport(tab, ["going to", "to"], DEST_CITY, DEST_CODE)
     await _redibe_state(tab, "01airports")
-    # date: click the departure date field, dump the calendar, pick a valid future day
-    await click_field(tab, "departure", "depart", "dates", "select date", "when", "travel date")
-    await tab.sleep(1.5)
-    daydump = await tab.evaluate(
-        "(()=>{const c=[...document.querySelectorAll('[class*=calendar],[class*=datepicker],[role=grid]')].find(e=>e.offsetParent);"
-        "return c?c.outerHTML.slice(0,500):'no-calendar';})()"
+    # date: the departure date is a <span role=combobox> with a calendar icon — click its combobox
+    # container to open the picker, dump it, then click a future day cell.
+    opened = await tab.evaluate(
+        "(()=>{const cb=[...document.querySelectorAll('[role=combobox]')].find(e=>e.offsetParent&&e.querySelector('.redibe-v3-icon_calendar'));"
+        "if(cb){cb.scrollIntoView({block:'center'});cb.click();return 'date-combobox-clicked';}return 'no-date-combobox';})()"
     )
-    print(f"[CALENDAR] {str(daydump)[:500]}", flush=True)
-    await click_exact(tab, FUTURE_DAY, allow_nav=True)
-    await tab.sleep(1)
-    await click_exact(tab, "confirm", "done", "ok", "apply")
+    print(f"[DATE OPEN] {opened}", flush=True)
+    await tab.sleep(1.8)
+    daydump = await tab.evaluate(
+        "(()=>{const c=[...document.querySelectorAll('[class*=calendar],[class*=datepicker],[class*=month],[role=grid]')].find(e=>e.offsetParent);"
+        "return c?c.outerHTML.slice(0,900):'no-calendar';})()"
+    )
+    print(f"[CALENDAR] {str(daydump)[:900]}", flush=True)
+    # dump calendar HTML to an artifact for offline day-selector design
+    try:
+        cal = await tab.evaluate(
+            "(()=>{const c=[...document.querySelectorAll('[class*=calendar],[class*=datepicker],[role=grid],[class*=redibe-v3-date]')].find(e=>e.offsetParent);"
+            "return c?c.outerHTML:'no-cal';})()"
+        )
+        if isinstance(cal, str) and len(cal) > 50:
+            with open("cap_cathay_calendar.html", "w") as f:
+                f.write(cal[:400000])
+            print(f"CALENDAR_HTML saved ({len(cal)} chars)", flush=True)
+    except Exception:
+        pass
+    # click a non-disabled future day cell (target day ~3 weeks out, fall back to any high day)
+    picked = await tab.evaluate(
+        "(()=>{const cells=[...document.querySelectorAll('td,[role=gridcell],[class*=day],button')]"
+        ".filter(e=>e.offsetParent&&/^\\s*\\d{1,2}\\s*$/.test(e.textContent||'')"
+        "&&!/disabled|past|--disabled/i.test((e.className||'')+(e.getAttribute('aria-disabled')||''))"
+        "&&e.getAttribute('aria-disabled')!=='true');"
+        "const want=cells.find(e=>e.textContent.trim()==='" + FUTURE_DAY + "');"
+        "const r=want||cells.find(e=>+e.textContent.trim()>=22)||cells[cells.length-1];"
+        "if(r){r.scrollIntoView({block:'center'});r.click();return 'day:'+r.textContent.trim();}return 'no-day';})()"
+    )
+    print(f"[DAY PICK] {picked}", flush=True)
+    await tab.sleep(1.2)
+    await click_exact(tab, "confirm", "done", "ok", "apply", "select")
     await _redibe_state(tab, "02date")
-    # click the redibe search button (prefer one inside the redibe widget, not the site header)
+    # click the redibe search button (#redibe-v3-button); it enables once From+To+date are set
     clicked = await tab.evaluate(
-        "(()=>{const bs=[...document.querySelectorAll('button,[role=button],input[type=submit]')]"
-        ".filter(e=>e.offsetParent&&/^\\s*search/i.test((e.textContent||'')+(e.value||''))&&!e.closest('header,nav'));"
-        "const r=bs.find(e=>e.closest('[class*=redibe],[id*=redibe]'))||bs[0];"
-        "if(r){r.scrollIntoView({block:'center'});r.click();return 'clicked:'+((r.textContent||r.value||'').replace(/\\s+/g,' ').trim().slice(0,30));}return 'no-search-btn';})()"
+        "(()=>{const b=document.getElementById('redibe-v3-button');"
+        "if(!b)return 'no-button';const dis=b.getAttribute('aria-disabled')==='true'||/--disabled/.test(b.className||'');"
+        "b.scrollIntoView({block:'center'});b.click();return 'clicked redibe-v3-button disabled='+dis;})()"
     )
     print(f"[SEARCH CLICK] {clicked}", flush=True)
     await tab.sleep(26)  # availability is slow (IBE session + api.cathaypacific.com pricing)
