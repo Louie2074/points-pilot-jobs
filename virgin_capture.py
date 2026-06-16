@@ -29,6 +29,9 @@ WARM_URL = "https://www.virginatlantic.com/"
 ORIGIN_CITY, ORIGIN_CODE = "New York", "JFK"
 DEST_CITY, DEST_CODE = "London", "LHR"
 FUTURE_DAY = "22"  # day-of-month to click in the calendar (run ~mid-June 2026)
+# Virgin's date picker day cells are button[data-cy="day-component-YYYY-MM-DD"] — target exact dates
+FUTURE_DEP = "2026-07-15"
+FUTURE_RET = "2026-07-22"
 
 # Full-fidelity interceptor with sessionStorage persistence — the Amadeus award flow top-navigates
 # (/book/search → /book/cart-new/upsell), which resets an in-memory array, so we persist captures
@@ -389,29 +392,26 @@ async def drive_virgin(tab):
         print(f"[WHEN STRUCT] {str(whenstruct)[:600]}", flush=True)
     except Exception as e:
         print(f"FORM_DUMP_ERR {str(e)[:80]}", flush=True)
-    # date: REAL-click the "When" field/button to open the date picker (synthetic focus didn't),
-    # dump the calendar, and ONLY click a day if a calendar actually opened.
-    await _real_click(tab,
-        "[...document.querySelectorAll('input,button,[role=button],[role=combobox],div,span')]"
-        ".find(e=>e.offsetParent&&/^\\s*when\\b|select dates|departure date|add dates|choose date/i.test"
-        "((e.getAttribute('aria-label')||'')+'|'+(e.textContent||'').slice(0,20)))",
-        "when-field")
+    # date: #flights_departing is a readonly input that opens #popover-when. Real-click it, then
+    # click the exact day buttons (data-cy="day-component-YYYY-MM-DD"). Pick a return too in case
+    # the journey is round-trip (harmless if one-way).
+    await _real_click(tab, "document.getElementById('flights_departing')", "departing-field")
     await tab.sleep(2)
-    cal = await tab.evaluate(
-        "(()=>{const c=[...document.querySelectorAll('[class*=calendar],[class*=datepicker],[role=grid],[class*=month],[class*=DatePicker],[class*=Calendar]')].find(e=>e.offsetParent);"
-        "return c?(c.className+' :: '+c.outerHTML.slice(0,600)):'no-calendar';})()"
+    popover = await tab.evaluate(
+        "(()=>{const p=document.getElementById('popover-when');"
+        "const days=document.querySelectorAll('button[data-cy^=day-component]:not([disabled])').length;"
+        "return JSON.stringify({popoverOpen:!!(p&&p.offsetParent),enabledDays:days});})()"
     )
-    print(f"[CALENDAR] {str(cal)[:700]}", flush=True)
-    if isinstance(cal, str) and cal != "no-calendar":
-        await _real_click(tab,
-            "(()=>{const cells=[...document.querySelectorAll('td,[role=gridcell],[class*=day],button,span,a')]"
-            ".filter(e=>e.offsetParent&&/^\\s*\\d{1,2}\\s*$/.test(e.textContent||'')"
-            "&&!/disabled|past|--disabled/i.test((e.className||'')+(e.getAttribute('aria-disabled')||''))"
-            "&&e.getAttribute('aria-disabled')!=='true'&&e.closest('[class*=calendar],[class*=picker],[role=grid],[class*=Calendar]'));"
-            "return cells.find(e=>e.textContent.trim()==='" + FUTURE_DAY + "')||cells.find(e=>+e.textContent.trim()>=22)||cells[0];})()",
-            "day-cell")
-        await tab.sleep(1)
-        await click_exact(tab, "confirm", "ok", "done", "apply", "select", "add", "search dates", "search for flights")
+    print(f"[POPOVER] {popover}", flush=True)
+    await _real_click(tab,
+        "document.querySelector('button[data-cy=\"day-component-" + FUTURE_DEP + "\"]:not([disabled])')",
+        "dep-" + FUTURE_DEP)
+    await tab.sleep(1.2)
+    await _real_click(tab,
+        "document.querySelector('button[data-cy=\"day-component-" + FUTURE_RET + "\"]:not([disabled])')",
+        "ret-" + FUTURE_RET)
+    await tab.sleep(1)
+    await click_exact(tab, "search for flights", "search dates", "done", "apply", "confirm")
     await _vs_state(tab, "after-date")
     # search
     await _real_click(tab,
