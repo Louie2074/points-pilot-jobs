@@ -106,6 +106,19 @@ class TurkishScraper(BrowserScraper):
     sparse_step = 4
     max_routes_per_run = 12
 
+    def _ensure_loop(self):
+        """Drive the browser on nodriver's OWN event loop. nodriver binds its CDP connection
+        reader to ``uc.loop()``; using BrowserScraper's default fresh ``new_event_loop()`` trips
+        ``AssertionError: cannot call get() concurrently`` on the 2nd+ CDP op (this scraper makes
+        several: one availability fetch per cabin, plus PerimeterX retries). Delta/Southwest only
+        do a single fetch per scrape so never hit it; we do, so align with nodriver's loop."""
+        import nodriver as uc
+
+        if self._loop is None or self._loop.is_closed():
+            self._loop = uc.loop()
+            asyncio.set_event_loop(self._loop)
+        return self._loop
+
     def _build_body(self, origin: str, dest: str, travel_date: date, cabin_api: str) -> dict:
         """Minimal award-availability request — airport codes + date are all the API needs."""
         return {
