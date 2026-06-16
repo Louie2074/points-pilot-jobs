@@ -485,6 +485,32 @@ async def main():
             await tab.save_screenshot("etihad_capture.png")
         except Exception:
             pass
+        # Dump the full results HTML + per-card outerHTML as artifacts for offline structure
+        # analysis (precise selectors, cabin labels, aria-labels) — avoids more CI round-trips.
+        try:
+            html = await tab.evaluate("document.documentElement.outerHTML")
+            if isinstance(html, str):
+                with open("cap_etihad_results.html", "w") as f:
+                    f.write(html[:4000000])
+                print(f"RESULTS_HTML saved ({len(html)} chars)", flush=True)
+        except Exception as e:
+            print(f"HTML_DUMP_ERR {type(e).__name__}: {str(e)[:100]}", flush=True)
+        try:
+            cards_html = await tab.evaluate(r"""
+            (()=>{const out=[];const seen=new Set();
+              for(const e of document.querySelectorAll('*')){
+                if(!/From\s*Miles/i.test(e.textContent||''))continue;
+                let c=e;for(let i=0;i<6&&c.parentElement;i++){const p=c.parentElement;
+                  if((p.textContent||'').length>1400)break;c=p;}
+                const h=c.outerHTML;if(h.length<200||h.length>40000||seen.has(h))continue;
+                seen.add(h);out.push(h);if(out.length>=3)break;}
+              return JSON.stringify(out);})()""")
+            if isinstance(cards_html, str):
+                with open("cap_etihad_cards.json", "w") as f:
+                    f.write(cards_html)
+                print(f"CARDS_HTML saved ({len(cards_html)} chars)", flush=True)
+        except Exception as e:
+            print(f"CARDS_DUMP_ERR {type(e).__name__}: {str(e)[:100]}", flush=True)
     finally:
         try:
             browser.stop()

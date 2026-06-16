@@ -35,5 +35,7 @@ jobs:
           path: |
             cap_etihad_full.json
             cap_etihad_net.json
+            cap_etihad_results.html
+            cap_etihad_cards.json
             etihad_*.png
           if-no-files-found: ignore
