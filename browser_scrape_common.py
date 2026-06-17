@@ -86,7 +86,7 @@ def ping_heartbeat(url: str, logger: logging.Logger) -> None:
 
 
 def freshness(source: str, logger: logging.Logger) -> dict:
-    """``{<source>_rows, <source>_newest_age_h}`` snapshot for the metric. Best-effort, never raises."""
+    """``{<source>_rows, <source>_newest_age_h}`` snapshot for the metric. Best-effort/no-raise."""
     try:
         from db.connection import get_connection
 
