@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS routes_queue (
     airline             VARCHAR(10) NOT NULL DEFAULT 'alaska',  -- scraper slug (queue per airline)
     priority_tier       VARCHAR(4)  NOT NULL DEFAULT 'LOW',
     search_count        INTEGER     NOT NULL DEFAULT 0,
+    decayed_demand      DOUBLE      NOT NULL DEFAULT 0,
+    last_search_at_utc  TIMESTAMP,
+    change_rate         DOUBLE      NOT NULL DEFAULT 0.5,
+    last_cheapest       VARCHAR,
+    interval_h          DOUBLE,
     last_scraped_at_utc TIMESTAMP,              -- NULL = never scraped
     next_scrape_at_utc  TIMESTAMP   NOT NULL DEFAULT now(),
     created_at_utc      TIMESTAMP   NOT NULL DEFAULT now(),
@@ -176,6 +181,16 @@ _CREATE_BANK_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_transfer_bonuses_active "
     "ON transfer_bonuses (airline_code, starts_at, ends_at);",
 ]
+
+_CREATE_AIRLINE_BUDGET = """
+CREATE TABLE IF NOT EXISTS airline_budget (
+    airline          VARCHAR(10) PRIMARY KEY,
+    tokens           DOUBLE      NOT NULL DEFAULT 0,
+    capacity         DOUBLE      NOT NULL DEFAULT 0,
+    refill_per_hour  DOUBLE      NOT NULL DEFAULT 0,
+    last_refill_utc  TIMESTAMP   NOT NULL DEFAULT now()
+)
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +407,22 @@ _MIGRATIONS: list[tuple[int, str, str | list[str] | Callable]] = [
         "add cash_fares; transfer_bonuses UNIQUE for idempotent upsert; drop dead airports",
         _migrate_v7,
     ),
+    # NOTE: jobs has no v8/v9 (those are scraper-only ondemand_coverage/cash_coverage tables).
+    # Numbering this v10 aligns jobs with the shared prod schema; the v8/v9 gap is intentional.
+    (
+        10,
+        "adaptive scheduling: routes_queue scoring columns + airline_budget table",
+        [
+            # DuckDB cannot ALTER-ADD a NOT NULL column, so these ALTERs drop NOT NULL and
+            # backfill via DEFAULT; the baseline CREATE (fresh DBs) carries the full NOT NULL.
+            "ALTER TABLE routes_queue ADD COLUMN IF NOT EXISTS decayed_demand DOUBLE DEFAULT 0",
+            "ALTER TABLE routes_queue ADD COLUMN IF NOT EXISTS last_search_at_utc TIMESTAMP",
+            "ALTER TABLE routes_queue ADD COLUMN IF NOT EXISTS change_rate DOUBLE DEFAULT 0.5",
+            "ALTER TABLE routes_queue ADD COLUMN IF NOT EXISTS last_cheapest VARCHAR",
+            "ALTER TABLE routes_queue ADD COLUMN IF NOT EXISTS interval_h DOUBLE",
+            _CREATE_AIRLINE_BUDGET,
+        ],
+    ),
 ]
 
 BASELINE_VERSION = 1
@@ -427,6 +458,7 @@ def migrate() -> None:
         _CREATE_TRANSFER_BONUSES_SEQ,
         _CREATE_TRANSFER_BONUSES,
         *_CREATE_BANK_INDEXES,
+        _CREATE_AIRLINE_BUDGET,
     ]:
         conn.execute(ddl)
 
