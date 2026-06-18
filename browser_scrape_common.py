@@ -17,7 +17,17 @@ from __future__ import annotations
 import logging
 import time
 import urllib.request
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+
+
+@dataclass
+class _PairJob:
+    """Minimal ``.origin``/``.dest`` carrier so the on-demand path feeds ``run_scrape``'s unified
+    loop the same shape as a queue-mode ``RouteJob`` (which also exposes ``.origin``/``.dest``)."""
+
+    origin: str
+    dest: str
 
 
 def parse_dates_csv(csv: str, logger: logging.Logger | None = None) -> list[date]:
@@ -92,13 +102,12 @@ def build_queue_plan(
     ``max_legs`` directed routes. The returned ``RouteJob``s carry the tier / interval_h /
     change_rate / last_cheapest needed for adaptive marking in ``run_scrape``.
     """
-    from config.settings import SCORE_FETCH_MULTIPLE
     from pipeline.queue_manager import QueueManager
 
     q = QueueManager(scraper=None)
     q.seed_from_config()  # idempotent upsert of ALL airlines incl. this one
-    fetch = max(max_legs * shards, max_legs * shards * SCORE_FETCH_MULTIPLE)
-    due = q.get_due_batch(limit=fetch, airline=airline)
+    # get_due_batch widens by SCORE_FETCH_MULTIPLE internally — pass the plain intended batch size.
+    due = q.get_due_batch(limit=max_legs * shards, airline=airline)
     mine = due[shard_index::shards][:max_legs]
     dates = [today + timedelta(days=i) for i in range(scrape_days)]
     return mine, dates
@@ -177,9 +186,7 @@ def run_scrape(
         iterable = list(route_jobs)
         due_count = len(iterable)
     else:
-        iterable = [
-            type("P", (), {"origin": o, "dest": d})() for o, d in pairs
-        ]
+        iterable = [_PairJob(o, d) for o, d in pairs]
         due_count = len(pairs)
 
     started = time.monotonic()
