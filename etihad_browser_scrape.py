@@ -17,6 +17,7 @@ import time
 from datetime import date
 
 import browser_scrape_common as common
+from config.settings import CRON_MAX_LEGS_PER_SHARD
 
 ETIHAD_HEARTBEAT_URL = os.getenv("ETIHAD_HEARTBEAT_URL", "")
 
@@ -28,15 +29,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("etihad_browser_scrape")
 
-# US gateways ↔ Abu Dhabi (both directions scraped). Routes Etihad doesn't operate simply return
-# no cards (harmless empty); these are the long-standing + current US gateways.
-ETIHAD_ROUTES: list[tuple[str, str]] = [
-    ("JFK", "AUH"),
-    ("ORD", "AUH"),
-    ("IAD", "AUH"),
-    ("BOS", "AUH"),
-    ("LAX", "AUH"),
-]
+# Cron routes now live in config/routes.py (seeded into the scored queue via seed_from_config);
+# the daily cron drains the scored due-batch instead of a static list.
+MAX_LEGS_PER_SHARD = CRON_MAX_LEGS_PER_SHARD["etihad"]
 SCRAPE_DAYS = int(os.getenv("ETIHAD_SCRAPE_DAYS", "3"))  # near-term window, scraped every day
 
 # On-demand single-route mode (workflow_dispatch inputs); empty in the daily cron.
@@ -44,7 +39,7 @@ ROUTE_ORIGIN = os.getenv("ETIHAD_ROUTE_ORIGIN", "").strip()
 ROUTE_DEST = os.getenv("ETIHAD_ROUTE_DEST", "").strip()
 ROUTE_DATES = os.getenv("ETIHAD_ROUTE_DATES", "").strip()
 
-# Cron sharding: split ETIHAD_ROUTES across N parallel runs on separate runner IPs (default single).
+# Cron sharding: split the scored due-batch across N parallel runs on separate IPs (default single).
 SHARDS = max(1, int(os.getenv("ETIHAD_SHARDS", "1")))
 SHARD_INDEX = int(os.getenv("ETIHAD_SHARD_INDEX", "0"))
 
@@ -54,10 +49,31 @@ def _parse_dates_csv(csv: str):  # re-exported for tests
 
 
 def _build_plan(route_origin, route_dest, route_dates_csv, scrape_days, today,
-                shard_index=0, shards=1):  # re-exported for tests
+                shard_index=0, shards=1):  # re-exported for the on-demand tests
+    # Routes no longer live here (cron drains the queue); the on-demand single-route path
+    # never consults the route list, so pass an empty list.
     return common.build_plan(
-        ETIHAD_ROUTES, route_origin, route_dest, route_dates_csv, scrape_days, today,
+        [], route_origin, route_dest, route_dates_csv, scrape_days, today,
         shard_index, shards, logger,
+    )
+
+
+def _run_cron(shard_index: int, shards: int) -> None:
+    """Drain this shard's slice of the scored queue (seed → due-batch → stride → cap)."""
+    from scrapers.etihad import EtihadScraper
+
+    route_jobs, dates = common.build_queue_plan(
+        "etihad", shard_index=shard_index, shards=shards,
+        max_legs=MAX_LEGS_PER_SHARD, scrape_days=SCRAPE_DAYS, today=date.today(),
+    )
+    logger.info(
+        "Cron queue mode (shard %d/%d): %d due routes × %d dates",
+        shard_index, shards, len(route_jobs), len(dates),
+    )
+    common.run_scrape(
+        EtihadScraper(), [], dates,
+        source="etihad", service="point-pilot-etihad", airline="EY",
+        heartbeat_url=ETIHAD_HEARTBEAT_URL, logger=logger, route_jobs=route_jobs,
     )
 
 
@@ -73,25 +89,22 @@ def main() -> None:
     from scrapers.etihad import EtihadScraper
 
     install_log_shipping("point-pilot-etihad")
-    migrate()
+    migrate()  # idempotent; brings a fresh DB to v10 (no-op on the already-migrated prod DB)
     logger.info("Schema ready")
 
-    pairs, dates = _build_plan(
-        ROUTE_ORIGIN, ROUTE_DEST, ROUTE_DATES, SCRAPE_DAYS, date.today(), SHARD_INDEX, SHARDS
-    )
     if ROUTE_ORIGIN and ROUTE_DEST:
-        logger.info("On-demand mode: %s→%s × %d dates", ROUTE_ORIGIN, ROUTE_DEST, len(dates))
-    else:
-        logger.info(
-            "Cron mode (shard %d/%d): %d routes × %d dates",
-            SHARD_INDEX, SHARDS, len(pairs), len(dates),
+        # On-demand single-route mode (workflow_dispatch): no queue marking.
+        pairs, dates = _build_plan(
+            ROUTE_ORIGIN, ROUTE_DEST, ROUTE_DATES, SCRAPE_DAYS, date.today(), SHARD_INDEX, SHARDS
         )
-
-    common.run_scrape(
-        EtihadScraper(), pairs, dates,
-        source="etihad", service="point-pilot-etihad", airline="EY",
-        heartbeat_url=ETIHAD_HEARTBEAT_URL, logger=logger,
-    )
+        logger.info("On-demand mode: %s→%s × %d dates", ROUTE_ORIGIN, ROUTE_DEST, len(dates))
+        common.run_scrape(
+            EtihadScraper(), pairs, dates,
+            source="etihad", service="point-pilot-etihad", airline="EY",
+            heartbeat_url=ETIHAD_HEARTBEAT_URL, logger=logger,
+        )
+    else:
+        _run_cron(SHARD_INDEX, SHARDS)
 
 
 if __name__ == "__main__":

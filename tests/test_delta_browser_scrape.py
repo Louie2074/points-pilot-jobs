@@ -1,6 +1,6 @@
 from datetime import date
 
-from delta_browser_scrape import DELTA_ROUTES, _build_plan, _parse_dates_csv
+from delta_browser_scrape import _build_plan, _parse_dates_csv
 
 
 def test_parse_dates_csv_valid():
@@ -31,42 +31,6 @@ def test_build_plan_single_route_no_dates_falls_back_to_window():
     assert dates == [date(2026, 6, 8), date(2026, 6, 9), date(2026, 6, 10)]
 
 
-def test_build_plan_cron_mode_both_directions():
-    pairs, dates = _build_plan("", "", "", 2, date(2026, 6, 8))
-    # cron mode: every popular route in BOTH directions
-    assert ("ATL", "LAX") in pairs
-    assert ("LAX", "ATL") in pairs
-    assert len(dates) == 2
-    assert len(pairs) == 2 * len(DELTA_ROUTES)
-
-
-def test_delta_routes_count_and_no_reverse_dups():
-    assert len(DELTA_ROUTES) == 26
-    keys = [frozenset(p) for p in DELTA_ROUTES]
-    assert len(keys) == len(set(keys)), "reverse/exact dup in DELTA_ROUTES"
-    assert all(len(k) == 2 for k in keys)
-
-
-def test_delta_covers_msp_demand():
-    assert ("MSP", "JFK") in DELTA_ROUTES  # the 0-result gap from the logs
-
-
-def test_build_plan_cron_shards_partition_all_routes_disjointly():
-    # The 3 production shards must TOGETHER cover every route (both directions), be pairwise
-    # disjoint, and each stay well under Delta's ~27 directed-leg per-session Akamai ceiling.
-    shards = [
-        _build_plan("", "", "", 5, date(2026, 6, 8), shard_index=i, shards=3)[0] for i in range(3)
-    ]
-    for i in range(3):
-        for j in range(i + 1, 3):
-            assert set(shards[i]).isdisjoint(set(shards[j])), "shards overlap — route scraped twice"
-    full, _ = _build_plan("", "", "", 5, date(2026, 6, 8))
-    union = set().union(*shards)
-    assert union == set(full), "shards must cover every route"
-    assert sum(len(s) for s in shards) == len(full) == 2 * len(DELTA_ROUTES)
-    assert max(len(s) for s in shards) <= 27, "a shard exceeds the ~27 directed-leg Akamai ceiling"
-
-
 def test_build_plan_single_route_only_shard0_works():
     # On-demand single-route dispatch spawns both matrix shards, but only shard 0 scrapes;
     # other shards no-op so the route isn't scraped twice.
@@ -74,3 +38,23 @@ def test_build_plan_single_route_only_shard0_works():
     p1, d1 = _build_plan("ATL", "LAX", "", 5, date(2026, 6, 8), shard_index=1, shards=2)
     assert p0 == [("ATL", "LAX")] and d0
     assert p1 == [] and d1 == []
+
+
+def test_delta_cron_uses_queue(monkeypatch):
+    import delta_browser_scrape as ep
+
+    calls = {}
+
+    def fake_build_queue_plan(airline, **kw):
+        calls.update(airline=airline, **kw)
+        return (["JOB"], ["DATE"])
+
+    monkeypatch.setattr(ep.common, "build_queue_plan", fake_build_queue_plan)
+    monkeypatch.setattr(ep.common, "run_scrape", lambda *a, **k: 0)
+    monkeypatch.setattr("scrapers.delta.DeltaScraper", lambda *a, **k: object())
+
+    ep._run_cron(shard_index=0, shards=3)
+    assert calls["airline"] == "delta"
+    assert calls["max_legs"] == ep.MAX_LEGS_PER_SHARD
+    assert calls["shard_index"] == 0
+    assert calls["shards"] == 3
