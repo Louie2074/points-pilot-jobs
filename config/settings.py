@@ -124,3 +124,37 @@ CASH_TTL_HOURS: int = int(_get("CASH_TTL_HOURS", "48"))
 CASH_TOP_ROUTES: int = int(_get("CASH_TOP_ROUTES", "20"))
 CASH_REFRESH_INTERVAL_MIN: int = int(_get("CASH_REFRESH_INTERVAL_MIN", "180"))
 CASH_SCRAPE_DAYS: int = int(_get("CASH_SCRAPE_DAYS", "7"))
+
+# ---------------------------------------------------------------------------
+# Adaptive scheduling (vendored from scraper; Phase 2 cron unification)
+# ---------------------------------------------------------------------------
+# Cap on inline on-demand scrape dates (imported by queue_manager).
+MAX_INLINE_SCRAPE_DATES: int = int(_get("MAX_INLINE_SCRAPE_DATES", "5"))
+DEMAND_HALF_LIFE_DAYS: float = float(_get("DEMAND_HALF_LIFE_DAYS", "14"))
+CHANGE_RATE_ALPHA: float = float(_get("CHANGE_RATE_ALPHA", "0.3"))
+CHANGE_RATE_SEED: float = float(_get("CHANGE_RATE_SEED", "0.5"))
+DEMAND_REF: float = float(_get("DEMAND_REF", "10"))
+SCORE_W_DEMAND: float = float(_get("SCORE_W_DEMAND", "0.5"))
+SCORE_W_OVERDUE: float = float(_get("SCORE_W_OVERDUE", "0.3"))
+SCORE_W_CHANGE: float = float(_get("SCORE_W_CHANGE", "0.2"))
+SCORE_FETCH_MULTIPLE: int = int(_get("SCORE_FETCH_MULTIPLE", "4"))
+
+CADENCE_BOUNDS_H: dict[str, tuple[int, int]] = {
+    PriorityTier.HIGH: (int(_get("CADENCE_HIGH_LO_H", "8")), int(_get("CADENCE_HIGH_HI_H", "24"))),
+    PriorityTier.MED: (int(_get("CADENCE_MED_LO_H", "24")), int(_get("CADENCE_MED_HI_H", "72"))),
+    PriorityTier.LOW: (int(_get("CADENCE_LOW_LO_H", "48")), int(_get("CADENCE_LOW_HI_H", "144"))),
+}
+CADENCE_STEP_H: dict[str, int] = {
+    PriorityTier.HIGH: int(_get("CADENCE_STEP_HIGH_H", "8")),
+    PriorityTier.MED: int(_get("CADENCE_STEP_MED_H", "24")),
+    PriorityTier.LOW: int(_get("CADENCE_STEP_LOW_H", "48")),
+}
+
+# Cron per-shard leg cap (directed routes per shard per run). Sized below each airline's
+# per-session WAF ceiling so shards × cap stays under it (e.g. Delta 3 shards × 9 ≈ 27).
+CRON_MAX_LEGS_PER_SHARD: dict[str, int] = {
+    "delta": int(_get("DELTA_MAX_LEGS_PER_SHARD", "9")),
+    "southwest": int(_get("SOUTHWEST_MAX_LEGS_PER_SHARD", "20")),
+    "turkish": int(_get("TURKISH_MAX_LEGS_PER_SHARD", "20")),
+    "etihad": int(_get("ETIHAD_MAX_LEGS_PER_SHARD", "20")),
+}
