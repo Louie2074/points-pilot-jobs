@@ -55,6 +55,7 @@ AIRPORT_TZ: dict[str, str] = {
     "SFO": "America/Los_Angeles",
     "SJC": "America/Los_Angeles",
     "SLC": "America/Denver",
+    "SMF": "America/Los_Angeles",  # Sacramento — Southwest focus-city spoke
     "SNA": "America/Los_Angeles",
     "TPA": "America/New_York",
 }
