@@ -285,8 +285,10 @@ class QueueManager:
         )
         route = db.get_route(origin, dest, airline=airline)
         tier = route["priority_tier"] if route else PriorityTier.LOW
-        promoted_tier = self._maybe_promote(origin, dest, new_count, airline=airline)
-        effective_tier = promoted_tier or tier
+        # _maybe_promote bumps the tier as a side-effect (db.set_route_tier) and returns the
+        # new tier (or None). The on-demand path is demand-only — the scheduler owns cadence —
+        # so we only use the tier to stamp the freshness TTL on any scraped rows below.
+        effective_tier = self._maybe_promote(origin, dest, new_count, airline=airline) or tier
 
         # Step 3: figure out exactly which dates we still need to scrape.
         # We scrape a date if we don't already have any fresh row for it
@@ -341,23 +343,6 @@ class QueueManager:
                         db.upsert_flights(stamped)
                         results.extend(stamped)
 
-                if not blocked:
-                    now = datetime.now(timezone.utc)
-                    new_cheapest = scoring.cheapest_by_cabin(results)
-                    fresh = db.get_route(origin, dest, airline=airline) or {}
-                    job = RouteJob(
-                        origin=origin,
-                        dest=dest,
-                        airline=airline,
-                        tier=effective_tier,
-                        search_count=new_count,
-                        last_scraped_at=None,
-                        next_scrape_at=now,
-                        change_rate=_seed_rate(fresh.get("change_rate")),
-                        interval_h=fresh.get("interval_h"),
-                        last_cheapest=fresh.get("last_cheapest"),
-                    )
-                    self.mark_scraped(job, new_cheapest, now)
                 logger.info(
                     "On-demand scrape complete: %s→%s — %d records%s",
                     origin,
