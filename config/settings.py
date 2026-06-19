@@ -157,7 +157,9 @@ CADENCE_STEP_H: dict[str, int] = {
 # 54 legs/day. Env-overridable so it can be dialed back from the `blocked` metric without a deploy.
 CRON_MAX_LEGS_PER_SHARD: dict[str, int] = {
     "delta": int(_get("DELTA_MAX_LEGS_PER_SHARD", "18")),
-    "southwest": int(_get("SOUTHWEST_MAX_LEGS_PER_SHARD", "20")),
+    # 20 tripped Southwest's F5/Shape 403 block storm at ~13 legs/session (Phase-3 live validation);
+    # 10 keeps each shard below that block point so the 3-shard run completes clean (no abort).
+    "southwest": int(_get("SOUTHWEST_MAX_LEGS_PER_SHARD", "10")),
     "turkish": int(_get("TURKISH_MAX_LEGS_PER_SHARD", "20")),
     "etihad": int(_get("ETIHAD_MAX_LEGS_PER_SHARD", "20")),
 }
