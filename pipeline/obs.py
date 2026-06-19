@@ -155,11 +155,15 @@ def install_log_shipping(service: str) -> None:
         return
     level = getattr(logging, os.getenv("BETTERSTACK_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
     root = logging.getLogger()
-    if not any(isinstance(f, _BenignNoiseFilter) for f in root.filters):
-        root.addFilter(_BenignNoiseFilter())
     if any(isinstance(h, _BetterStackLogHandler) for h in root.handlers):
         return
-    root.addHandler(_BetterStackLogHandler(service, level))
+    handler = _BetterStackLogHandler(service, level)
+    # The benign noise (nodriver teardown, blake2) is emitted by library loggers like `asyncio`
+    # and PROPAGATES up to this handler. A filter on the root *logger* is only consulted for
+    # records logged directly on root — never for propagated ones — so it must live on the
+    # HANDLER to actually drop the noise before it ships.
+    handler.addFilter(_BenignNoiseFilter())
+    root.addHandler(handler)
     ship_log(f"INFO {service} [obs] started — direct log shipping enabled")
 
 

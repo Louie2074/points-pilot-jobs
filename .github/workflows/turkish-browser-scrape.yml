@@ -34,6 +34,15 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Turkish has 20 directed pairs = 40 legs, but the per-shard cap is 20 — one shard could only
+    # ever cover half the catalogue per day (the queue alternated halves, leaving 20 routes ~48h
+    # stale). Two parallel runs on separate runner IPs stride-shard the scored due-batch
+    # (due[shard::2]), so 2 × 20 = 40 legs = the full catalogue refreshed daily. On-demand
+    # single-route dispatch still spawns both shards, but only shard 0 does the work.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -50,6 +59,8 @@ jobs:
           BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
           TURKISH_HEARTBEAT_URL: ${{ secrets.TURKISH_HEARTBEAT_URL }}
           TURKISH_SCRAPE_DAYS: "3"
+          TURKISH_SHARDS: "2"
+          TURKISH_SHARD_INDEX: ${{ matrix.shard }}
           TURKISH_ROUTE_ORIGIN: ${{ inputs.origin }}
           TURKISH_ROUTE_DEST: ${{ inputs.destination }}
           TURKISH_ROUTE_DATES: ${{ inputs.dates }}

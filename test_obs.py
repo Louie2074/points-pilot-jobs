@@ -138,3 +138,26 @@ def test_benign_noise_filter_drops_known_lines():
         exc_info=None,
     )
     assert f.filter(keep) is True
+
+
+def test_install_log_shipping_filters_propagated_asyncio_noise(monkeypatch):
+    """The nodriver teardown noise is emitted by the `asyncio` logger and PROPAGATES to the
+    root handler. A filter on the root *logger* is never consulted for propagated records, so
+    the filter must live on the handler."""
+    cap = _patch_post(monkeypatch)
+    monkeypatch.setenv("BETTERSTACK_LOGS_TOKEN", "logtok")
+    root = logging.getLogger()
+    handlers_before = root.handlers[:]
+    filters_before = root.filters[:]
+    try:
+        obs.install_log_shipping("point-pilot-turkish")
+        logging.getLogger("asyncio").error(
+            "Task was destroyed but it is pending! task: <Task ... Connection.aclose()>"
+        )
+        logging.getLogger("scrapers.turkish").warning("real scrape warning")
+        shipped = [body for _, _, body in cap.calls]
+        assert not any("Task was destroyed" in m for m in shipped), shipped
+        assert any("real scrape warning" in m for m in shipped), shipped
+    finally:
+        root.handlers[:] = handlers_before
+        root.filters[:] = filters_before
