@@ -36,6 +36,14 @@ jobs:
     # the slowest scrape, and the old 75-min cap cancelled a full run mid-flight.
     # This is a ceiling, not the runtime — typical runs finish well under it.
     timeout-minutes: 150
+    # 3 shards on separate runner IPs split the due set (stride-sharded by build_queue_plan),
+    # each staying at the proven 20 legs/shard — Southwest's F5/Shape per-session ceiling is
+    # uncharacterized, so we add IPs rather than push one IP higher. On-demand single-route
+    # dispatch still spawns all shards, but only shard 0 does the work.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -52,6 +60,8 @@ jobs:
           BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
           SOUTHWEST_HEARTBEAT_URL: ${{ secrets.SOUTHWEST_HEARTBEAT_URL }}
           SOUTHWEST_SCRAPE_DAYS: "5"
+          SOUTHWEST_SHARDS: "3"
+          SOUTHWEST_SHARD_INDEX: ${{ matrix.shard }}
           SOUTHWEST_ROUTE_ORIGIN: ${{ inputs.origin }}
           SOUTHWEST_ROUTE_DEST: ${{ inputs.destination }}
           SOUTHWEST_ROUTE_DATES: ${{ inputs.dates }}

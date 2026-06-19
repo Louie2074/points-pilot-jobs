@@ -150,10 +150,13 @@ CADENCE_STEP_H: dict[str, int] = {
     PriorityTier.LOW: int(_get("CADENCE_STEP_LOW_H", "48")),
 }
 
-# Cron per-shard leg cap (directed routes per shard per run). Sized below each airline's
-# per-session WAF ceiling so shards × cap stays under it (e.g. Delta 3 shards × 9 ≈ 27).
+# Cron per-shard leg cap (directed routes per shard per run). Each shard runs on a FRESH
+# GH-Actions runner IP, so this is the per-shard (per-IP, per-session) limit, sized below each
+# airline's per-session WAF ceiling — NOT a budget shared across shards. Delta's ceiling is ~27
+# directed legs/session (a live run blocked on leg 28); 18 keeps a ~10-leg margin × 3 shards =
+# 54 legs/day. Env-overridable so it can be dialed back from the `blocked` metric without a deploy.
 CRON_MAX_LEGS_PER_SHARD: dict[str, int] = {
-    "delta": int(_get("DELTA_MAX_LEGS_PER_SHARD", "9")),
+    "delta": int(_get("DELTA_MAX_LEGS_PER_SHARD", "18")),
     "southwest": int(_get("SOUTHWEST_MAX_LEGS_PER_SHARD", "20")),
     "turkish": int(_get("TURKISH_MAX_LEGS_PER_SHARD", "20")),
     "etihad": int(_get("ETIHAD_MAX_LEGS_PER_SHARD", "20")),
