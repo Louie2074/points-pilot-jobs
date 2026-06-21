@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: ${{ inputs.origin != '' && format('turkish-ondemand-{0}-{1}', inputs.origin, inputs.destination) || 'turkish-browser-scrape' }}
@@ -33,6 +34,12 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/louie2074/points-pilot-jobs-scraper:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --shm-size=2g
     timeout-minutes: 60
     # Turkish has 20 directed pairs = 40 legs, but the per-shard cap is 20 — one shard could only
     # ever cover half the catalogue per day (the queue alternated halves, leaving 20 routes ~48h
@@ -45,14 +52,6 @@ jobs:
         shard: [0, 1]
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-      - name: Install deps
-        run: pip install -r requirements.txt
       - name: Scrape Turkish (headful Chrome under xvfb, Azure IP)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

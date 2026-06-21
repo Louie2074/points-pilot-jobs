@@ -24,6 +24,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: ${{ inputs.origin != '' && format('southwest-ondemand-{0}-{1}', inputs.origin, inputs.destination) || 'southwest-browser-scrape' }}
@@ -32,6 +33,12 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/louie2074/points-pilot-jobs-scraper:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --shm-size=2g
     # 22 routes × both directions: Southwest's F5/Shape per-request sensor makes it
     # the slowest scrape, and the old 75-min cap cancelled a full run mid-flight.
     # This is a ceiling, not the runtime — typical runs finish well under it.
@@ -46,14 +53,6 @@ jobs:
         shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-      - name: Install deps
-        run: pip install -r requirements.txt
       - name: Scrape Southwest (headful Chrome under xvfb, Azure IP)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
