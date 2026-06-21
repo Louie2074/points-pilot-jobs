@@ -4,7 +4,7 @@ GitHub's Azure runner IPs clear Etihad's Akamai + Imperva ABP where Fly/httpx ca
 nodriver browser scrape runs here (like Delta/Southwest/Turkish). Drives the public award
 deep-link per US↔AUH route over a near-term date window in one warmed Chrome session, DOM-scrapes
 the rendered fare-selection cards (see ``scrapers/etihad.py``), normalizes, and upserts into
-MotherDuck ``flights``, then exits. Manual workflow_dispatch or daily cron. Tunable via env:
+Postgres ``pp.flights``, then exits. Manual workflow_dispatch or daily cron. Tunable via env:
 ETIHAD_SCRAPE_DAYS (default 3); single-route on-demand mode via ETIHAD_ROUTE_ORIGIN/DEST/DATES.
 
 The run plan + scrape loop + metric + heartbeat are shared — see ``browser_scrape_common.py``.

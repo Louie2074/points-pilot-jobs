@@ -4,7 +4,7 @@ Southwest's shopping endpoint is gated by an F5/Shape per-request JS sensor that
 so the nodriver browser scrape runs here on GitHub's Azure runner IPs — a warmed nodriver Chrome
 session mints a valid token per in-page fetch (see ``scrapers/southwest.py``). Scrapes popular
 focus-city routes (both directions) over a near-term date window, normalizes, and upserts into
-MotherDuck ``flights``, then exits. Suitable for a manual workflow_dispatch or a cron. Tunable via
+Postgres ``pp.flights``, then exits. Suitable for a manual workflow_dispatch or a cron. Tunable via
 env: SOUTHWEST_SCRAPE_DAYS (default 5); single-route on-demand mode via
 SOUTHWEST_ROUTE_ORIGIN/DEST/DATES.
 

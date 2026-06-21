@@ -2,7 +2,7 @@
 Priority queue manager for the scraping pipeline.
 
 Owns all logic for route tier management, promotion, and on-demand scraping.
-The queue itself lives in the MotherDuck `routes_queue` table — persistent
+The queue itself lives in the Postgres `pp.routes_queue` table — persistent
 across restarts with no in-memory state to lose.
 
 Tier promotion thresholds (from settings):
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 def _as_utc(ts: datetime | None) -> datetime | None:
-    """Tag a naive DuckDB timestamp as UTC so it can be compared/subtracted against a tz-aware
+    """Tag a naive Postgres TIMESTAMP as UTC so it can be compared/subtracted against a tz-aware
     ``datetime.now(timezone.utc)`` (the table stores naive UTC). None passes through."""
     if ts is not None and ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)

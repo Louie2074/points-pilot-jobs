@@ -3,7 +3,7 @@
 Delta's award site is Akamai-walled to Fly/httpx (HTTP 444), so the nodriver browser scrape runs
 here on GitHub's Azure runner IPs (which clear Akamai). Scrapes popular Delta hub routes over a
 near-term date window via one warmed Chrome session (in-page availability fetch — see
-``scrapers/delta.py``), normalizes, and upserts into MotherDuck ``flights``, then exits. Suitable
+``scrapers/delta.py``), normalizes, and upserts into Postgres ``pp.flights``, then exits. Suitable
 for a manual workflow_dispatch or a cron. Tunable via env: DELTA_SCRAPE_DAYS (default 5);
 single-route on-demand mode via DELTA_ROUTE_ORIGIN/DEST/DATES; cron sharding via DELTA_SHARDS /
 DELTA_SHARD_INDEX (Delta's ~27-leg Akamai ceiling → the cron shards across parallel runner IPs).

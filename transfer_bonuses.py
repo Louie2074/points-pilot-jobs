@@ -41,7 +41,7 @@ BONUSES_HEARTBEAT_URL = os.getenv("BONUSES_HEARTBEAT_URL", "")
 
 SOURCE_URL = "https://travel-on-points.com/current-point-transfer-bonuses/"
 
-# Site's "Transfer From" cell text → bank_programs.id in MotherDuck.
+# Site's "Transfer From" cell text → bank_programs.id in Postgres.
 # Keys are lowercased for case-insensitive lookup.
 BANK_MAP: dict[str, int] = {
     "american express": 2,

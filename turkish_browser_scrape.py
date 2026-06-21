@@ -3,7 +3,7 @@
 GitHub's Azure runner IPs clear Turkish's TLS-fingerprint block + PerimeterX where Fly/httpx
 can't, so the nodriver browser scrape runs here (like Delta/Southwest). Scrapes popular US↔IST
 award routes over a near-term date window via one warmed Chrome session (in-page availability
-fetch — see ``scrapers/turkish.py``), normalizes, and upserts into MotherDuck ``flights``, then
+fetch — see ``scrapers/turkish.py``), normalizes, and upserts into Postgres ``pp.flights``, then
 exits. Manual workflow_dispatch or daily cron. Tunable via env: TURKISH_SCRAPE_DAYS (default 3);
 single-route on-demand mode via TURKISH_ROUTE_ORIGIN/DEST/DATES.
 
