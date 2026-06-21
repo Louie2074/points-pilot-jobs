@@ -46,8 +46,8 @@ _CABIN_RULES: tuple[tuple[str, str], ...] = (
     ("DELTA ONE", "business"),
     ("BUSINESS", "business"),
     ("FIRST", "first"),  # Domestic First / First Class
-    ("COMFORT", "premium_economy"),  # Delta Comfort+
-    ("DCP", "premium_economy"),  # Delta Comfort+ branded-fare code (e.g. CDCP), seen live
+    ("COMFORT", "economy"),  # Delta Comfort+ — extra-legroom ECONOMY, not a separate cabin
+    ("DCP", "economy"),  # Delta Comfort+ branded-fare code (e.g. CDCP), seen live — economy
     ("PREMIUM_SELECT", "premium_economy"),  # Delta Premium Select (long-haul PE)
     ("PREMIUM SELECT", "premium_economy"),
     ("PREMIUM", "premium_economy"),
