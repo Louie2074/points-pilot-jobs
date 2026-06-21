@@ -3,9 +3,9 @@
 transfer_partners — scrape thriftytraveler.com for bank→airline transfer
 partners and ratios, and snapshot-replace the `transfer_partners` table.
 
-Sole owner of `transfer_partners` in MotherDuck. Full-table snapshot: delete all,
-insert the freshly-scraped rows for the managed banks. Runs on a GitHub Actions
-cron (twice monthly) or on-demand via workflow_dispatch.
+Sole owner of `pp.transfer_partners` in Postgres. Full-table snapshot: delete all,
+insert the freshly-scraped rows for the managed banks (atomic — one transaction).
+Runs on a GitHub Actions cron (twice monthly) or on-demand via workflow_dispatch.
 
 Coverage is gated to airlines already tracked (AIRLINE_MAP). Hotel rows and
 unmapped airlines are skipped + logged. Marriott (id 6) and Rove are skipped.
@@ -14,7 +14,7 @@ Fail-closed: HTTP non-2xx or "no managed bank tables found at all" raises → no
 exit → workflow failure. A bank section that maps to zero rows just contributes
 nothing (pure snapshot).
 
-Requires MOTHERDUCK_TOKEN. BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
+Requires DATABASE_URL (Postgres). BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
 """
 
 from __future__ import annotations
@@ -28,11 +28,12 @@ import subprocess
 import time
 from decimal import ROUND_HALF_UP, Decimal
 
-import duckdb
 import nodriver as uc
 from bs4 import BeautifulSoup
+from sqlalchemy import Connection, text
 
 from obs import flush, install_log_shipping, ping_heartbeat, ship_metric
+from pp_db import queries as pq
 
 logger = logging.getLogger("transfer_partners")
 
@@ -278,44 +279,40 @@ def parse_partners(html: str) -> tuple[list[dict], dict]:
 
 
 def reconcile(
-    conn: duckdb.DuckDBPyConnection,
+    conn: Connection,
     records: list[dict],
     dry_run: bool = False,
 ) -> tuple[int, int]:
-    """Full-table snapshot-replace of transfer_partners (this job is the sole owner).
+    """Full-table snapshot-replace of ``pp.transfer_partners`` (this job is the sole owner).
 
     Deletes EVERY row, then inserts the freshly-scraped records. Returns
     (rows_deleted, rows_inserted). dry_run → no writes, returns (0, 0).
+
+    ``conn`` is a SQLAlchemy Connection inside a single transaction (opened by ``main()`` via
+    ``get_engine().begin()``), so the DELETE + re-INSERT commit atomically — readers never see an
+    empty table, and a mid-insert failure rolls the whole snapshot back (strictly better than the
+    old non-atomic DuckDB autocommit, which mattered because this is the sole owner of the table).
     """
     if dry_run:
-        count = conn.execute("SELECT COUNT(*) FROM transfer_partners").fetchone()[0]
+        count = conn.execute(text("SELECT COUNT(*) FROM pp.transfer_partners")).scalar()
         logger.info("[dry-run] Would delete %d row(s) and insert %d row(s).", count, len(records))
         return 0, 0
 
-    deleted = conn.execute("DELETE FROM transfer_partners").fetchone()[0]
+    deleted = conn.execute(text("SELECT COUNT(*) FROM pp.transfer_partners")).scalar()
+    conn.execute(text("DELETE FROM pp.transfer_partners"))
 
     inserted = 0
-    if records:
-        conn.executemany(
-            """
-            INSERT INTO transfer_partners
-                (bank_program_id, airline_code, program_name,
-                 transfer_ratio, min_transfer, transfer_increment)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    r["bank_program_id"],
-                    r["airline_code"],
-                    r["program_name"],
-                    r["transfer_ratio"],
-                    r["min_transfer"],
-                    r["transfer_increment"],
-                )
-                for r in records
-            ],
+    for r in records:
+        pq.upsert_transfer_partner(
+            conn,
+            bank_program_id=r["bank_program_id"],
+            airline_code=r["airline_code"],
+            program_name=r["program_name"],
+            transfer_ratio=r["transfer_ratio"],
+            min_transfer=r["min_transfer"],
+            transfer_increment=r["transfer_increment"],
         )
-        inserted = len(records)
+    inserted = len(records)
 
     logger.info("Deleted %d row(s), inserted %d row(s).", deleted, inserted)
     return deleted, inserted
@@ -439,15 +436,6 @@ def fetch_page(url: str = SOURCE_URL) -> str:
     return asyncio.run(_fetch_with_nodriver(url))
 
 
-def connect() -> duckdb.DuckDBPyConnection:
-    """Open a UTC-pinned MotherDuck connection to the point_pilot database."""
-    if not os.environ.get("MOTHERDUCK_TOKEN"):
-        raise RuntimeError("MOTHERDUCK_TOKEN is not set — cannot connect to MotherDuck.")
-    conn = duckdb.connect("md:point_pilot")
-    conn.execute("SET TimeZone='UTC'")
-    return conn
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -478,8 +466,10 @@ def main() -> int:
             stats["banks_missing"],
         )
 
-        conn = connect()
-        deleted, inserted = reconcile(conn, records, dry_run=args.dry_run)
+        from pp_db.engine import get_engine
+
+        with get_engine().begin() as conn:
+            deleted, inserted = reconcile(conn, records, dry_run=args.dry_run)
         ok = True
         return 0
     except Exception:

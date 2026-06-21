@@ -86,8 +86,8 @@ def main() -> None:
         logger.critical("Configuration error: %s", exc)
         sys.exit(1)
 
-    from db.schema import migrate
     from pipeline.obs import install_log_shipping
+    from pp_db.autocommit import migrate
 
     install_log_shipping("point-pilot-delta")  # ship WARNING+ logs to Better Stack
     migrate()  # idempotent; brings a fresh DB to the current schema version (no-op on prod)

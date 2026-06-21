@@ -129,13 +129,15 @@ def ping_heartbeat(url: str, logger: logging.Logger) -> None:
 def freshness(source: str, logger: logging.Logger) -> dict:
     """``{<source>_rows, <source>_newest_age_h}`` snapshot for the metric. Best-effort/no-raise."""
     try:
-        from db.connection import get_connection
+        from sqlalchemy import text
 
-        total, newest = (
-            get_connection()
-            .execute("SELECT count(*), max(scraped_at_utc) FROM flights WHERE source = ?", [source])
-            .fetchone()
-        )
+        from pp_db.engine import get_engine
+
+        with get_engine().connect() as c:
+            total, newest = c.execute(
+                text("SELECT count(*), max(scraped_at_utc) FROM pp.flights WHERE source = :source"),
+                {"source": source},
+            ).fetchone()
         age_h = None
         if newest is not None:
             if newest.tzinfo is None:
@@ -174,10 +176,9 @@ def run_scrape(
         added to the metric.
     """
     from config.settings import PriorityTier
-    from db.connection import close_connection
-    from db.queries import upsert_flights
     from pipeline.normalizer import filter_valid, stamp_expiry
     from pipeline.obs import ship_metric
+    from pp_db.autocommit import close_connection, upsert_flights
     from scrapers.base import ScraperBlockedError
 
     queue_mode = route_jobs is not None

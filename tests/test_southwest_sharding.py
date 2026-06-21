@@ -1,16 +1,26 @@
-"""Phase 3: Southwest cron runs across 3 fresh-IP shards, partitioning the due set disjointly."""
+"""Phase 3: Southwest cron runs across 3 fresh-IP shards, partitioning the due set disjointly.
 
+The shard-matrix assertion is pure YAML (no DB — always runs). The plan-partition test exercises
+``build_queue_plan``→``QueueManager``, which after the MotherDuck→Supabase cutover reads
+``pp.routes_queue`` from Postgres, so it seeds the real ``pp`` container via the
+``pp_db.autocommit`` facade and skips when ``DATABASE_URL`` is unset.
+"""
+
+import os
 from datetime import date
 
-import duckdb
 import pytest
 import yaml
 
 import browser_scrape_common as common
 from config.settings import PriorityTier
-from db import queries as db
 
 _WF = ".github/workflows/southwest-browser-scrape.yml"
+
+_NEEDS_PG = pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL"),
+    reason="DATABASE_URL unset — queue-plan test needs a live pp schema",
+)
 
 
 def test_southwest_workflow_has_3_shard_matrix():
@@ -24,27 +34,19 @@ def test_southwest_workflow_has_3_shard_matrix():
     assert env["SOUTHWEST_SHARD_INDEX"] == "${{ matrix.shard }}"
 
 
-@pytest.fixture(autouse=True)
-def conn():
-    import db.connection as db_conn
-
-    c = duckdb.connect(":memory:")
-    c.execute("SET TimeZone='UTC'")
-    db_conn._local.conn = c
-    from db import schema
-
-    schema.migrate()
-    yield c
-    db_conn._local.conn = None
-    c.close()
-
-
+@_NEEDS_PG
 def test_southwest_3shard_plan_partitions_due_set():
+    from sqlalchemy import text
+
+    from pp_db import autocommit as db
+    from pp_db.engine import get_engine
+
+    with get_engine().begin() as c:
+        c.execute(text("TRUNCATE pp.routes_queue RESTART IDENTITY CASCADE"))
     for i in range(9):
         db.upsert_route(f"O{i:02d}", f"D{i:02d}", PriorityTier.MED, airline="southwest")
-    db.get_connection().execute(
-        "UPDATE routes_queue SET next_scrape_at_utc = now() - INTERVAL '1 hour'"
-    )
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE pp.routes_queue SET next_scrape_at_utc = now() - INTERVAL '1 hour'"))
     today = date(2026, 6, 18)
     sets = []
     for idx in range(3):

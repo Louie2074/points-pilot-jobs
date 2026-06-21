@@ -13,3 +13,7 @@ pytest>=8,<9
 httpx[http2]>=0.27.0
 tenacity>=8.3.0
 python-dotenv>=1.0.0
+# pp_db (Supabase Postgres) data layer — the MotherDuck→Postgres cutover.
+sqlalchemy>=2.0,<2.1
+psycopg[binary]>=3.1
+asyncpg>=0.29

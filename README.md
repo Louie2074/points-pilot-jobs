@@ -8,7 +8,6 @@ database (`md:point_pilot`).
 
 | Script | Workflow | Schedule | What it does |
 |---|---|---|---|
-| `cleanup_flights.py` | `cleanup-flights.yml` | daily 03:15 UTC | Deletes rows from `flights` **and `cash_fares`** whose travel `date` is older than yesterday (UTC). |
 | `transfer_bonuses.py` | `transfer-bonuses.yml` | 1st & 15th, 09:00 UTC | Scrapes current point-transfer bonuses from travel-on-points.com and snapshot-replaces the `transfer_bonuses` table. |
 | `transfer_partners.py` | `transfer-partners.yml` | 1st & 15th, 10:00 UTC | Scrapes bank→airline transfer partners + ratios from thriftytraveler.com and full-table snapshot-replaces the `transfer_partners` table (sole owner). |
 | `delta_browser_scrape.py` | `delta-browser-scrape.yml` | daily 08:00 UTC + on-demand dispatch | `nodriver` browser scrape of Delta SkyMiles award space (Azure runner IP clears Akamai) → `flights`. |
@@ -18,8 +17,11 @@ database (`md:point_pilot`).
 | `turkish_validate.py` | `turkish-validate.yml` | dispatch-only (no schedule) | Onboarding/regression check: runs the Turkish scraper against a few US↔IST routes under `xvfb` on the Azure IP and prints the records. No DB write (dummy token). |
 | `etihad_validate.py` | `etihad-validate.yml` | dispatch-only (no schedule) | Onboarding/regression check: runs the Etihad scraper against a couple of US↔AUH routes under `xvfb` on the Azure IP and prints the records. No DB write (dummy token). |
 
-`obs.py` is the shared Better Stack shipper used by the cleanup + transfer jobs; the browser
+`obs.py` is the shared Better Stack shipper used by the transfer jobs; the browser
 scrapers use the vendored `pipeline/obs.py`. `conftest.py` holds shared pytest fixtures.
+
+Stale-row retention (formerly the daily `cleanup_flights.py` GH-Action) now runs as a Supabase
+**pg_cron** job (`pp-retention`) in the Postgres database itself, so it isn't a job in this repo.
 
 ### Award browser scrapers (Delta / Southwest / Turkish / Etihad)
 
@@ -45,32 +47,18 @@ fit one shard's cap — so its workflow intentionally has no `matrix`. The `scra
 airlines were reconned and parked because they require login or wall the datacenter IP behind a
 CAPTCHA; the recon notes live in the agent memory, not this repo.)
 
-### `cleanup_flights.py`
+### Stale-row retention (now Supabase pg_cron)
 
-Deletes every row older than yesterday (UTC) — keeps yesterday plus all future
-dates — from both date-keyed tables: `flights` and `cash_fares` (the Google Flights
-cash prices powering CPP, which have no other cleanup path). See `CLEANUP_TABLES`.
-Cleanup is anchored to the travel `date`, not `expires_at` (which is only a
-scrape-freshness TTL); this logic was moved out of the scraper (now a pure write
-pipeline) into this repo.
-
-```bash
-python cleanup_flights.py            # delete stale rows
-python cleanup_flights.py --dry-run  # report how many would be deleted, delete nothing
-```
-
-**Observability (optional).** When `BETTERSTACK_SOURCE_TOKEN` is set, each run ships
-a `cleanup_flights_run` completion metric to Better Stack (`ok`, `deleted` total +
-per-table `deleted_flights`/`deleted_cash_fares`, `duration_s`, `dry_run`) plus
-WARNING+ logs (failures with tracebacks), via direct HTTPS POST — see `obs.py`.
-Reuse the scraper's source token so events land in the
-same source; they're tagged `service=points-pilot-jobs`. No token → no-op.
+Deleting every flight/cash_fare row older than yesterday (UTC) used to be the daily
+`cleanup_flights.py` GitHub-Action. After the MotherDuck → Supabase Postgres cutover this
+retention runs **inside the database** as a Supabase **pg_cron** job (`pp-retention`), so there's
+no longer a script or workflow for it in this repo.
 
 ### `transfer_bonuses.py`
 
 Scrapes the current point-transfer bonuses from travel-on-points.com and
-snapshot-replaces the `transfer_bonuses` table in MotherDuck for every airline in
-`transfer_partners`. Like the award scrapers, it drives **headful Chrome via `nodriver`**
+snapshot-replaces the `pp.transfer_bonuses` Postgres table (atomically, in one transaction) for
+every airline in `transfer_partners`. Like the award scrapers, it drives **headful Chrome via `nodriver`**
 (the table is JS-rendered), so its workflow runs `browser-actions/setup-chrome` first.
 Fail-closed: any HTTP non-2xx or parse error raises and exits
 non-zero (workflow failure). Zero active bonuses is valid — it deletes all tracked
@@ -81,13 +69,14 @@ python transfer_bonuses.py            # scrape + snapshot-replace
 python transfer_bonuses.py --dry-run  # fetch + parse, skip the DELETE/INSERT
 ```
 
-Same observability contract as `cleanup_flights.py` (ships a completion metric +
-WARNING+ logs when `BETTERSTACK_SOURCE_TOKEN` is set).
+Ships a `transfer_bonuses_run` completion metric + WARNING+ logs to Better Stack when
+`BETTERSTACK_SOURCE_TOKEN` is set (via `obs.py`); no token → no-op.
 
 ### `transfer_partners.py`
 
 Scrapes bank→airline transfer partners and ratios from thriftytraveler.com and
-full-table snapshot-replaces the `transfer_partners` table in MotherDuck. Drives
+full-table snapshot-replaces the `pp.transfer_partners` Postgres table (atomically, in one
+transaction). Drives
 **headful Chrome via `nodriver`** (JS-rendered tables; workflow runs
 `browser-actions/setup-chrome`). This job is the **sole owner** of that table — the
 scraper no longer seeds it. Coverage is

@@ -1,15 +1,19 @@
-"""Unit tests for transfer_partners.py — no network, no MotherDuck required.
+"""Unit tests for transfer_partners.py.
 
 parse_partners: pure HTML → list[dict], tested with a fixture mirroring the
 thriftytraveler.com structure (per-bank heading + table: Program | Type |
-Transfer Ratio | Transfer Time).
+Transfer Ratio | Transfer Time). No network/DB — always runs.
 
-reconcile: full-table snapshot-replace, tested with an in-memory DuckDB.
+reconcile: full-table snapshot-replace, now against the real ``pp`` Postgres container (the
+MotherDuck→Supabase cutover ported ``reconcile`` from DuckDB to a SQLAlchemy Connection on
+``pp.transfer_partners``). Those tests skip if ``DATABASE_URL`` is unset and run inside a
+rolled-back transaction so they leave the table untouched.
 """
 
 from __future__ import annotations
 
-import duckdb
+import os
+
 import pytest
 
 from transfer_partners import (
@@ -17,6 +21,11 @@ from transfer_partners import (
     _parse_ratio,
     parse_partners,
     reconcile,
+)
+
+_NEEDS_PG = pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL"),
+    reason="DATABASE_URL unset — reconcile test needs a live pp schema",
 )
 
 # ---------------------------------------------------------------------------
@@ -222,25 +231,33 @@ def test_parse_section_with_empty_intervening_heading():
 
 
 @pytest.fixture()
-def mem_conn():
-    """In-memory DuckDB with the transfer_partners schema + a stale Marriott row."""
-    conn = duckdb.connect(":memory:")
-    conn.execute("SET TimeZone='UTC'")
-    conn.execute("""
-        CREATE TABLE transfer_partners (
-            bank_program_id    SMALLINT     NOT NULL,
-            airline_code       VARCHAR(10)  NOT NULL,
-            program_name       VARCHAR      NOT NULL,
-            transfer_ratio     DECIMAL(5,2) NOT NULL DEFAULT 1.00,
-            min_transfer       INTEGER      NOT NULL DEFAULT 1000,
-            transfer_increment INTEGER      NOT NULL DEFAULT 1000,
-            PRIMARY KEY (bank_program_id, airline_code)
+def pg_conn():
+    """A pp_db engine Connection inside a transaction, pre-seeded with two stale rows (incl. a
+    Marriott id-6 row the snapshot must drop). Rolled back at teardown so the real
+    ``pp.transfer_partners`` table is left untouched — mirrors production, where ``reconcile`` runs
+    inside ``get_engine().begin()``."""
+    from sqlalchemy import text
+
+    from pp_db.engine import get_engine
+
+    conn = get_engine().connect()
+    trans = conn.begin()
+    # Clear any rows so the seeded "stale" set is exactly what we assert on.
+    conn.execute(text("DELETE FROM pp.transfer_partners"))
+    conn.execute(
+        text(
+            "INSERT INTO pp.transfer_partners "
+            "(bank_program_id, airline_code, program_name, transfer_ratio, min_transfer, "
+            " transfer_increment) VALUES "
+            "(6, 'AS', 'Mileage Plan', 3.0, 3000, 3000), "
+            "(1, 'UA', 'MileagePlus', 1.0, 1000, 1000)"
         )
-    """)
-    # Stale data the snapshot must fully replace — incl. a Marriott (id 6) row.
-    conn.execute("INSERT INTO transfer_partners VALUES (6, 'AS', 'Mileage Plan', 3.0, 3000, 3000)")
-    conn.execute("INSERT INTO transfer_partners VALUES (1, 'UA', 'MileagePlus', 1.0, 1000, 1000)")
-    return conn
+    )
+    try:
+        yield conn
+    finally:
+        trans.rollback()
+        conn.close()
 
 
 def _sample_records():
@@ -264,19 +281,28 @@ def _sample_records():
     ]
 
 
-def test_reconcile_full_snapshot_drops_marriott(mem_conn):
+@_NEEDS_PG
+def test_reconcile_full_snapshot_drops_marriott(pg_conn):
     """All prior rows (incl. Marriott id 6) deleted; only the new records remain."""
-    deleted, inserted = reconcile(mem_conn, _sample_records())
+    from sqlalchemy import text
+
+    deleted, inserted = reconcile(pg_conn, _sample_records())
     assert deleted == 2
     assert inserted == 2
-    rows = mem_conn.execute(
-        "SELECT bank_program_id, airline_code FROM transfer_partners ORDER BY ALL"
+    rows = pg_conn.execute(
+        text(
+            "SELECT bank_program_id, airline_code FROM pp.transfer_partners "
+            "ORDER BY bank_program_id, airline_code"
+        )
     ).fetchall()
-    assert rows == [(1, "SQ"), (2, "CX")]  # no id 6, no stale UA
+    assert [tuple(r) for r in rows] == [(1, "SQ"), (2, "CX")]  # no id 6, no stale UA
 
 
-def test_reconcile_dry_run_leaves_table_unchanged(mem_conn):
+@_NEEDS_PG
+def test_reconcile_dry_run_leaves_table_unchanged(pg_conn):
     """--dry-run: returns (0, 0), no writes; stale rows still present."""
-    deleted, inserted = reconcile(mem_conn, _sample_records(), dry_run=True)
+    from sqlalchemy import text
+
+    deleted, inserted = reconcile(pg_conn, _sample_records(), dry_run=True)
     assert (deleted, inserted) == (0, 0)
-    assert mem_conn.execute("SELECT COUNT(*) FROM transfer_partners").fetchone()[0] == 2
+    assert pg_conn.execute(text("SELECT COUNT(*) FROM pp.transfer_partners")).scalar() == 2

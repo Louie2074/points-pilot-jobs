@@ -1,20 +1,28 @@
-"""Unit tests for transfer_bonuses.py — no network, no MotherDuck required.
+"""Unit tests for transfer_bonuses.py.
 
 parse_bonuses: pure HTML → list[dict], tested with a minimal fixture that mirrors
 the travel-on-points.com table structure (4 cols: Point Program, Bonus Rate,
-Airline / Hotel Program, End Date).
+Airline / Hotel Program, End Date). No network/DB — always runs.
 
-reconcile: snapshot-replace logic, tested with an in-memory DuckDB.
+reconcile: snapshot-replace logic, now against the real ``pp`` Postgres container (the
+MotherDuck→Supabase cutover ported ``reconcile`` from DuckDB to a SQLAlchemy Connection on
+``pp.transfer_bonuses``). Those tests skip if ``DATABASE_URL`` is unset and run inside a
+rolled-back transaction so they leave the table untouched.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import date
 
-import duckdb
 import pytest
 
 from transfer_bonuses import parse_bonuses, reconcile
+
+_NEEDS_PG = pytest.mark.skipif(
+    not os.environ.get("DATABASE_URL"),
+    reason="DATABASE_URL unset — reconcile test needs a live pp schema",
+)
 
 # ---------------------------------------------------------------------------
 # Minimal HTML fixture — mirrors the travel-on-points.com table structure.
@@ -131,47 +139,49 @@ def test_parse_no_table_raises():
 
 
 @pytest.fixture()
-def mem_conn():
-    """In-memory DuckDB seeded with the minimal schema and two transfer_partners rows."""
-    conn = duckdb.connect(":memory:")
-    conn.execute("SET TimeZone='UTC'")
-    conn.execute("CREATE SEQUENCE IF NOT EXISTS transfer_bonuses_id_seq")
-    conn.execute("""
-        CREATE TABLE transfer_partners (
-            bank_program_id  SMALLINT     NOT NULL,
-            airline_code     VARCHAR(10)  NOT NULL,
-            PRIMARY KEY (bank_program_id, airline_code)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE transfer_bonuses (
-            id               BIGINT      PRIMARY KEY DEFAULT nextval('transfer_bonuses_id_seq'),
-            bank_program_id  SMALLINT    NOT NULL,
-            airline_code     VARCHAR(10) NOT NULL,
-            bonus_pct        INTEGER     NOT NULL CHECK (bonus_pct > 0),
-            starts_at        DATE        NOT NULL,
-            ends_at          DATE        NOT NULL,
-            notes            VARCHAR,
-            created_at_utc   TIMESTAMP   NOT NULL DEFAULT now(),
-            updated_at_utc   TIMESTAMP   NOT NULL DEFAULT now(),
-            CHECK (ends_at >= starts_at),
-            UNIQUE (bank_program_id, airline_code, starts_at)
-        )
-    """)
-    # Two tracked airlines: AS (Alaska) and AF (Air France)
-    conn.execute("INSERT INTO transfer_partners (bank_program_id, airline_code) VALUES (5, 'AS')")
-    conn.execute("INSERT INTO transfer_partners (bank_program_id, airline_code) VALUES (2, 'AF')")
-    return conn
+def pg_conn():
+    """A pp_db engine Connection inside a transaction, seeded so the DELETE-scope predicate
+    (``airline_code IN (SELECT airline_code FROM pp.transfer_partners)``) has the two tracked
+    airlines AS + AF, plus one stale AS bonus. Rolled back at teardown so the real
+    ``pp.transfer_bonuses``/``transfer_partners`` tables are untouched — mirrors production, where
+    ``reconcile`` runs inside ``get_engine().begin()``."""
+    from sqlalchemy import text
 
+    from pp_db.engine import get_engine
 
-def test_reconcile_replaces_existing(mem_conn):
-    """Existing bonus is deleted; fresh record is inserted."""
-    mem_conn.execute(
-        "INSERT INTO transfer_bonuses "
-        "(bank_program_id, airline_code, bonus_pct, starts_at, ends_at) "
-        "VALUES (5, 'AS', 30, '2026-01-01', '2026-01-31')"
+    conn = get_engine().connect()
+    trans = conn.begin()
+    conn.execute(text("DELETE FROM pp.transfer_bonuses"))
+    conn.execute(text("DELETE FROM pp.transfer_partners"))
+    # Two tracked airlines: AS (Alaska) and AF (Air France).
+    conn.execute(
+        text(
+            "INSERT INTO pp.transfer_partners "
+            "(bank_program_id, airline_code, program_name) VALUES "
+            "(5, 'AS', 'Mileage Plan'), (2, 'AF', 'Flying Blue')"
+        )
     )
-    assert mem_conn.execute("SELECT COUNT(*) FROM transfer_bonuses").fetchone()[0] == 1
+    # A stale AS bonus the snapshot must replace/clear.
+    conn.execute(
+        text(
+            "INSERT INTO pp.transfer_bonuses "
+            "(bank_program_id, airline_code, bonus_pct, starts_at, ends_at) "
+            "VALUES (5, 'AS', 30, '2026-01-01', '2026-01-31')"
+        )
+    )
+    try:
+        yield conn
+    finally:
+        trans.rollback()
+        conn.close()
+
+
+@_NEEDS_PG
+def test_reconcile_replaces_existing(pg_conn):
+    """Existing bonus is deleted; fresh record is inserted."""
+    from sqlalchemy import text
+
+    assert pg_conn.execute(text("SELECT COUNT(*) FROM pp.transfer_bonuses")).scalar() == 1
 
     fresh = [
         {
@@ -183,35 +193,31 @@ def test_reconcile_replaces_existing(mem_conn):
             "notes": None,
         }
     ]
-    deleted, inserted = reconcile(mem_conn, fresh)
+    deleted, inserted = reconcile(pg_conn, fresh)
     assert deleted == 1
     assert inserted == 1
-    rows = mem_conn.execute(
-        "SELECT bank_program_id, airline_code, bonus_pct FROM transfer_bonuses"
+    rows = pg_conn.execute(
+        text("SELECT bank_program_id, airline_code, bonus_pct FROM pp.transfer_bonuses")
     ).fetchall()
-    assert rows == [(2, "AF", 25)]
+    assert [tuple(r) for r in rows] == [(2, "AF", 25)]
 
 
-def test_reconcile_zero_bonuses_clears_table(mem_conn):
+@_NEEDS_PG
+def test_reconcile_zero_bonuses_clears_table(pg_conn):
     """Empty records list → DELETE fires, nothing inserted. Valid (no active bonuses)."""
-    mem_conn.execute(
-        "INSERT INTO transfer_bonuses "
-        "(bank_program_id, airline_code, bonus_pct, starts_at, ends_at) "
-        "VALUES (5, 'AS', 30, '2026-01-01', '2026-01-31')"
-    )
-    deleted, inserted = reconcile(mem_conn, [])
+    from sqlalchemy import text
+
+    deleted, inserted = reconcile(pg_conn, [])
     assert deleted == 1
     assert inserted == 0
-    assert mem_conn.execute("SELECT COUNT(*) FROM transfer_bonuses").fetchone()[0] == 0
+    assert pg_conn.execute(text("SELECT COUNT(*) FROM pp.transfer_bonuses")).scalar() == 0
 
 
-def test_reconcile_dry_run_leaves_table_unchanged(mem_conn):
+@_NEEDS_PG
+def test_reconcile_dry_run_leaves_table_unchanged(pg_conn):
     """--dry-run: no DB changes, returns (0, 0)."""
-    mem_conn.execute(
-        "INSERT INTO transfer_bonuses "
-        "(bank_program_id, airline_code, bonus_pct, starts_at, ends_at) "
-        "VALUES (5, 'AS', 30, '2026-01-01', '2026-01-31')"
-    )
+    from sqlalchemy import text
+
     fresh = [
         {
             "bank_program_id": 2,
@@ -222,7 +228,7 @@ def test_reconcile_dry_run_leaves_table_unchanged(mem_conn):
             "notes": None,
         }
     ]
-    deleted, inserted = reconcile(mem_conn, fresh, dry_run=True)
+    deleted, inserted = reconcile(pg_conn, fresh, dry_run=True)
     assert (deleted, inserted) == (0, 0)
     # Table unchanged — stale AS bonus still present
-    assert mem_conn.execute("SELECT COUNT(*) FROM transfer_bonuses").fetchone()[0] == 1
+    assert pg_conn.execute(text("SELECT COUNT(*) FROM pp.transfer_bonuses")).scalar() == 1

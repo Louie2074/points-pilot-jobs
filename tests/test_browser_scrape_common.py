@@ -2,44 +2,49 @@
 
 The legacy on-demand path (`run_scrape(..., route_jobs=None)`) is exercised by the per-airline
 `_build_plan`/`_parse_dates_csv` tests; these focus on the new queue-aware path.
+
+After the MotherDuck→Supabase cutover, `run_scrape` upserts flights and closes connections through
+the `pp_db.autocommit` facade and `build_queue_plan`→`QueueManager` reads `pp.routes_queue` from
+Postgres, so these drive the real `pp` container. Seeding goes through the facade (the path the code
+under test uses) and a couple of raw UPDATEs force routes due. Skips if `DATABASE_URL` is unset.
 """
 
 import logging
+import os
 from datetime import date
 
-import duckdb
 import pytest
 
-import browser_scrape_common as common
-from config.settings import PriorityTier
-from db import queries as db
+if not os.environ.get("DATABASE_URL"):
+    pytest.skip(
+        "DATABASE_URL unset — run_scrape queue-mode test needs a live pp schema",
+        allow_module_level=True,
+    )
+
+from sqlalchemy import text  # noqa: E402
+
+import browser_scrape_common as common  # noqa: E402
+from config.settings import PriorityTier  # noqa: E402
+from pp_db import autocommit as db  # noqa: E402
+from pp_db.engine import get_engine  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def conn(monkeypatch):
-    import db.connection as db_conn
-
-    c = duckdb.connect(":memory:")
-    c.execute("SET TimeZone='UTC'")
-    db_conn._local.conn = c
-    # run_scrape's finally: close_connection() would tear down this in-memory DB (destroying the
-    # seeded rows we assert on afterwards) and force a real md: reconnect. Keep the shared
-    # connection alive across the run so the test can read the adaptive-mark result.
-    monkeypatch.setattr(db_conn, "close_connection", lambda: None)
-    from db import schema
-
-    schema.migrate()
-    yield c
-    db_conn._local.conn = None
-    c.close()
+def clean_routes():
+    """Empty routes_queue around each test so the seeded due-set is deterministic. ``run_scrape``'s
+    own ``close_connection()`` (the facade's) is safe — it just drops the thread-local conn."""
+    with get_engine().begin() as c:
+        c.execute(text("TRUNCATE pp.routes_queue RESTART IDENTITY CASCADE"))
+    yield
+    with get_engine().begin() as c:
+        c.execute(text("TRUNCATE pp.routes_queue RESTART IDENTITY CASCADE"))
 
 
 def _seed_due(n, airline="delta"):
     for i in range(n):
         db.upsert_route(f"O{i:02d}", f"D{i:02d}", PriorityTier.MED, airline=airline)
-    db.get_connection().execute(
-        "UPDATE routes_queue SET next_scrape_at_utc = now() - INTERVAL '1 hour'"
-    )
+    with get_engine().begin() as c:
+        c.execute(text("UPDATE pp.routes_queue SET next_scrape_at_utc = now() - INTERVAL '1 hour'"))
 
 
 def test_build_queue_plan_strides_disjoint_and_caps():
@@ -85,13 +90,17 @@ def test_run_scrape_queue_mode_marks_adaptively():
         logger=logging.getLogger("t"),
         route_jobs=route_jobs,
     )
-    row = db.get_connection().execute(
-        "SELECT interval_h FROM routes_queue WHERE airline='delta' AND interval_h IS NOT NULL"
-    ).fetchone()
+    with get_engine().connect() as c:
+        row = c.execute(
+            text(
+                "SELECT interval_h FROM pp.routes_queue "
+                "WHERE airline='delta' AND interval_h IS NOT NULL"
+            )
+        ).fetchone()
     assert row is not None  # the scraped route was marked adaptively
 
 
-def test_run_scrape_queue_mode_blocked_route_stays_due(conn):
+def test_run_scrape_queue_mode_blocked_route_stays_due():
     """The critical safety invariant: a WAF-blocked route is NEVER marked (stays due)."""
     from scrapers.base import ScraperBlockedError
 
@@ -122,7 +131,11 @@ def test_run_scrape_queue_mode_blocked_route_stays_due(conn):
         route_jobs=route_jobs,
     )
     # No interval_h was written, and last_scraped is still NULL -> route remains due.
-    marked = conn.execute(
-        "SELECT count(*) FROM routes_queue WHERE airline='delta' AND interval_h IS NOT NULL"
-    ).fetchone()[0]
+    with get_engine().connect() as c:
+        marked = c.execute(
+            text(
+                "SELECT count(*) FROM pp.routes_queue "
+                "WHERE airline='delta' AND interval_h IS NOT NULL"
+            )
+        ).scalar()
     assert marked == 0

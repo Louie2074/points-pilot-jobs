@@ -33,8 +33,8 @@ from config.settings import (
     TTL_HOURS,
     PriorityTier,
 )
-from db import queries as db
 from pipeline import normalizer, scoring
+from pp_db import autocommit as db
 from scrapers.base import ScraperBlockedError
 
 logger = logging.getLogger(__name__)

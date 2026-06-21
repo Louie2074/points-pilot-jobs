@@ -2,15 +2,15 @@
 """
 transfer_bonuses — scrape travel-on-points.com for current transfer bonuses.
 
-Snapshot-replaces the `transfer_bonuses` table in MotherDuck for all airlines
-tracked in `transfer_partners`. Runs on GitHub Actions cron (twice monthly) or
-on-demand via workflow_dispatch.
+Snapshot-replaces the `pp.transfer_bonuses` table in Postgres for all airlines
+tracked in `transfer_partners` (atomic — one transaction). Runs on GitHub Actions
+cron (twice monthly) or on-demand via workflow_dispatch.
 
 Fail-closed: HTTP non-2xx or parse error → raises → non-zero exit → workflow
 failure notification. Zero bonuses is valid — deletes all tracked bonuses and
 inserts nothing (no active bonuses right now).
 
-Requires MOTHERDUCK_TOKEN. BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
+Requires DATABASE_URL (Postgres). BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
 """
 
 from __future__ import annotations
@@ -24,11 +24,12 @@ import subprocess
 import time
 from datetime import date, datetime
 
-import duckdb
 import nodriver as uc
 from bs4 import BeautifulSoup
+from sqlalchemy import Connection, text
 
 from obs import flush, install_log_shipping, ping_heartbeat, ship_metric
+from pp_db import queries as pq
 
 logger = logging.getLogger("transfer_bonuses")
 
@@ -190,22 +191,28 @@ def parse_bonuses(html: str, today: date | None = None) -> list[dict]:
 
 
 def reconcile(
-    conn: duckdb.DuckDBPyConnection,
+    conn: Connection,
     records: list[dict],
     dry_run: bool = False,
 ) -> tuple[int, int]:
-    """Snapshot-replace transfer_bonuses for all airlines tracked in transfer_partners.
+    """Snapshot-replace ``pp.transfer_bonuses`` for all airlines tracked in transfer_partners.
 
     Deletes every row whose airline_code appears in transfer_partners, then
     inserts the freshly-scraped records. Returns (rows_deleted, rows_inserted).
 
     In dry_run mode: no DELETE/INSERT — returns (0, 0) and logs what would happen.
+
+    ``conn`` is a SQLAlchemy Connection inside a single transaction (opened by ``main()`` via
+    ``get_engine().begin()``), so the DELETE + re-INSERT commit atomically — readers never see an
+    empty/partial table, and a mid-insert failure rolls the whole snapshot back.
     """
     if dry_run:
         count = conn.execute(
-            "SELECT COUNT(*) FROM transfer_bonuses "
-            "WHERE airline_code IN (SELECT DISTINCT airline_code FROM transfer_partners)"
-        ).fetchone()[0]
+            text(
+                "SELECT COUNT(*) FROM pp.transfer_bonuses "
+                "WHERE airline_code IN (SELECT DISTINCT airline_code FROM pp.transfer_partners)"
+            )
+        ).scalar()
         logger.info(
             "[dry-run] Would delete %d row(s) and insert %d row(s).",
             count,
@@ -214,32 +221,30 @@ def reconcile(
         return 0, 0
 
     deleted = conn.execute(
-        "DELETE FROM transfer_bonuses "
-        "WHERE airline_code IN (SELECT DISTINCT airline_code FROM transfer_partners)"
-    ).fetchone()[0]
+        text(
+            "SELECT COUNT(*) FROM pp.transfer_bonuses "
+            "WHERE airline_code IN (SELECT DISTINCT airline_code FROM pp.transfer_partners)"
+        )
+    ).scalar()
+    conn.execute(
+        text(
+            "DELETE FROM pp.transfer_bonuses "
+            "WHERE airline_code IN (SELECT DISTINCT airline_code FROM pp.transfer_partners)"
+        )
+    )
 
     inserted = 0
-    if records:
-        conn.executemany(
-            """
-            INSERT INTO transfer_bonuses
-                (bank_program_id, airline_code, bonus_pct, starts_at, ends_at, notes,
-                 created_at_utc, updated_at_utc)
-            VALUES (?, ?, ?, ?, ?, ?, now(), now())
-            """,
-            [
-                (
-                    r["bank_program_id"],
-                    r["airline_code"],
-                    r["bonus_pct"],
-                    r["starts_at"],
-                    r["ends_at"],
-                    r["notes"],
-                )
-                for r in records
-            ],
+    for r in records:
+        pq.upsert_transfer_bonus(
+            conn,
+            bank_program_id=r["bank_program_id"],
+            airline_code=r["airline_code"],
+            bonus_pct=r["bonus_pct"],
+            starts_at=r["starts_at"],
+            ends_at=r["ends_at"],
+            notes=r["notes"],
         )
-        inserted = len(records)
+    inserted = len(records)
 
     logger.info("Deleted %d row(s), inserted %d row(s).", deleted, inserted)
     return deleted, inserted
@@ -308,15 +313,6 @@ def fetch_page(url: str = SOURCE_URL) -> str:
     return asyncio.run(_fetch_with_nodriver(url))
 
 
-def connect() -> duckdb.DuckDBPyConnection:
-    """Open a UTC-pinned MotherDuck connection to the point_pilot database."""
-    if not os.environ.get("MOTHERDUCK_TOKEN"):
-        raise RuntimeError("MOTHERDUCK_TOKEN is not set — cannot connect to MotherDuck.")
-    conn = duckdb.connect("md:point_pilot")
-    conn.execute("SET TimeZone='UTC'")
-    return conn
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -341,8 +337,10 @@ def main() -> int:
         records = parse_bonuses(html)
         logger.info("Parsed %d matching bonus row(s).", len(records))
 
-        conn = connect()
-        deleted, inserted = reconcile(conn, records, dry_run=args.dry_run)
+        from pp_db.engine import get_engine
+
+        with get_engine().begin() as conn:
+            deleted, inserted = reconcile(conn, records, dry_run=args.dry_run)
         ok = True
         return 0
     except Exception:

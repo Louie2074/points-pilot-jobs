@@ -3,8 +3,9 @@
 Scheduled GitHub Actions jobs for point_pilot. Two kinds of job, all writing to the shared
 MotherDuck DB (`md:point_pilot`):
 
-1. **Maintenance** — `cleanup_flights.py` (delete stale flights), `transfer_bonuses.py` +
-   `transfer_partners.py` (scrape bank/airline transfer data, snapshot-replace tables).
+1. **Maintenance** — `transfer_bonuses.py` + `transfer_partners.py` (scrape bank/airline transfer
+   data, snapshot-replace tables). (Stale-flight retention is now a Supabase pg_cron job,
+   `pp-retention`, not a GH-Action — the former `cleanup_flights.py` was removed in the cutover.)
 2. **Award browser scrapers** — `delta` / `southwest` / `turkish` / `etihad` `_browser_scrape.py`:
    `nodriver` (headful Chrome via CDP, under `xvfb`) scrapes of airlines whose sites block Fly's
    datacenter IP but clear on GitHub's Azure runner IPs.
@@ -17,7 +18,7 @@ Start with `README.md` for the job catalogue + schedules. This file is the worki
 |---|---|
 | Tests | `MOTHERDUCK_TOKEN=dummy pytest tests/ -q` (import-time settings gate needs the var; no real DB hit) |
 | Lint | `ruff check .` |
-| Run a maintenance job | `python cleanup_flights.py --dry-run` |
+| Run a maintenance job | `python transfer_partners.py --dry-run` (or `transfer_bonuses.py`) |
 | Validate an award scraper (no DB) | `MOTHERDUCK_TOKEN=dummy python turkish_validate.py` / `etihad_validate.py` (or dispatch `*-validate.yml`) |
 | Run an award scrape on-demand | dispatch `<airline>-browser-scrape.yml` with `origin`/`destination`/`dates` inputs |
 
