@@ -20,6 +20,34 @@ scrape), not here.
 """
 
 from config.settings import PriorityTier
+from config.metros import airports_for
+
+
+def route_set(origin: str, dest: str) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for concrete_origin in airports_for(origin):
+        for concrete_dest in airports_for(dest):
+            if concrete_origin == concrete_dest:
+                continue
+            pair = (concrete_origin, concrete_dest)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            pairs.append(pair)
+    return pairs
+
+
+def expand_route_pairs(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    expanded: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for origin, dest in pairs:
+        for pair in route_set(origin, dest):
+            if pair in seen:
+                continue
+            seen.add(pair)
+            expanded.append(pair)
+    return expanded
 
 # ---------------------------------------------------------------------------
 # Alaska Airlines Mileage Plan — anchored on SEA/PDX/ANC + Hawaii.
@@ -31,13 +59,13 @@ ALASKA_HIGH_ROUTES: list[tuple[str, str]] = []
 
 ALASKA_MED_ROUTES: list[tuple[str, str]] = [
     # core hubs / transcons (was the prior HIGH+MED set, now all daily)
-    ("SEA", "JFK"),
+    *route_set("SEA", "NYC"),
     ("SEA", "BOS"),
     ("SEA", "ORD"),
     ("SEA", "LAX"),
     ("SEA", "SFO"),
     ("SEA", "DEN"),
-    ("PDX", "JFK"),
+    *route_set("PDX", "NYC"),
     ("PDX", "LAX"),
     ("ANC", "SEA"),
     ("SEA", "ATL"),
@@ -47,8 +75,8 @@ ALASKA_MED_ROUTES: list[tuple[str, str]] = [
     ("PDX", "ORD"),
     ("PDX", "SFO"),
     ("PDX", "DEN"),
-    ("SFO", "JFK"),
-    ("LAX", "JFK"),
+    *route_set("SFO", "NYC"),
+    *route_set("LAX_METRO", "NYC"),
     ("LAX", "BOS"),
     ("SAN", "SEA"),
     ("SJC", "SEA"),
@@ -56,7 +84,6 @@ ALASKA_MED_ROUTES: list[tuple[str, str]] = [
     ("BOI", "SEA"),
     ("GEG", "SEA"),
     # new: SEA transcons + focus
-    ("SEA", "EWR"),
     ("SEA", "IAD"),
     ("SEA", "DCA"),
     ("SEA", "PHL"),
@@ -264,7 +291,7 @@ ETIHAD_MED_ROUTES: list[tuple[str, str]] = [
 # JetBlue TrueBlue — anchored on JFK/BOS/FLL (smallest set)
 # ---------------------------------------------------------------------------
 JETBLUE_HIGH_ROUTES: list[tuple[str, str]] = [
-    ("JFK", "LAX"),
+    *route_set("NYC", "LAX_METRO"),
     ("JFK", "FLL"),
     ("BOS", "JFK"),
 ]
@@ -304,6 +331,10 @@ _AIRLINE_ROUTES: list[tuple[str, list[tuple[str, str]], list[tuple[str, str]]]] 
 # automatically. Award/points coverage for these should also be seeded above (ALASKA_*/etc.).
 CASH_PINNED_ROUTES: list[tuple[str, str]] = [
     ("SEA", "MSP"),
+    *route_set("SEA", "NYC"),
+    *route_set("PDX", "NYC"),
+    *route_set("SFO", "NYC"),
+    *route_set("LAX_METRO", "NYC"),
 ]
 
 
@@ -316,11 +347,19 @@ def all_seeded_routes() -> list[tuple[str, str, str, str]]:
     Used by QueueManager.seed_from_config().
     """
     result: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    def add(origin: str, dest: str, airline: str, tier: str) -> None:
+        key = (origin, dest, airline)
+        if key in seen:
+            return
+        seen.add(key)
+        result.append((origin, dest, airline, tier))
+
     for airline, highs, meds in _AIRLINE_ROUTES:
-        for origin, dest in highs:
-            result.append((origin, dest, airline, PriorityTier.HIGH))
-            result.append((dest, origin, airline, PriorityTier.HIGH))
-        for origin, dest in meds:
-            result.append((origin, dest, airline, PriorityTier.MED))
-            result.append((dest, origin, airline, PriorityTier.MED))
+        for origin, dest in expand_route_pairs(highs):
+            add(origin, dest, airline, PriorityTier.HIGH)
+            add(dest, origin, airline, PriorityTier.HIGH)
+        for origin, dest in expand_route_pairs(meds):
+            add(origin, dest, airline, PriorityTier.MED)
+            add(dest, origin, airline, PriorityTier.MED)
     return result

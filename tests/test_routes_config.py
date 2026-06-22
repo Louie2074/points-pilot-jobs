@@ -9,6 +9,7 @@ due batch from the seeded queue.
 from config.routes import (
     _AIRLINE_ROUTES,
     all_seeded_routes,
+    route_set,
 )
 from config.settings import PriorityTier
 
@@ -19,6 +20,19 @@ def test_all_seeded_routes_are_four_tuples():
     routes = all_seeded_routes()
     assert routes, "expected seeded routes"
     assert all(len(r) == 4 for r in routes)  # (origin, dest, airline, tier)
+
+
+def test_route_set_expands_nyc():
+    assert route_set("SEA", "NYC") == [("SEA", "JFK"), ("SEA", "EWR"), ("SEA", "LGA")]
+
+
+def test_seeded_routes_include_nyc_concrete_pairs():
+    seeded = all_seeded_routes()
+    keys = {(o, d, a) for o, d, a, _ in seeded}
+    assert ("SEA", "JFK", "alaska") in keys
+    assert ("SEA", "EWR", "alaska") in keys
+    assert ("SEA", "LGA", "alaska") in keys
+    assert all(o != d for o, d, *_ in seeded)
 
 
 def test_cron_airlines_seeded_and_grown():
