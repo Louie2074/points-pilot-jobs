@@ -149,6 +149,13 @@ def freshness(source: str, logger: logging.Logger) -> dict:
         return {}
 
 
+def _tier_for_job(job, default: str) -> str:
+    """The expiry tier for a scraped route: the queue RouteJob's adaptive tier in cron mode,
+    or `default` for on-demand _PairJobs (which have no .tier). Fixes the prior flat-MED stamp
+    that ignored HIGH (8h) / LOW (48h) windows."""
+    return getattr(job, "tier", default)
+
+
 def run_scrape(
     scraper,
     pairs: list[tuple[str, str]],
@@ -213,7 +220,7 @@ def run_scrape(
                     logger.error("Error scraping %s→%s %s: %s", origin, dest, travel, exc)
                     error_count += 1
                     continue
-                stamped = stamp_expiry(filter_valid(recs), PriorityTier.MED)
+                stamped = stamp_expiry(filter_valid(recs), _tier_for_job(job, PriorityTier.MED))
                 if stamped:
                     upsert_flights(stamped)
                     route_recs.extend(stamped)
