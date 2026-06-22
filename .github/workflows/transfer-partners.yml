@@ -43,6 +43,9 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
+          BETTERSTACK_INGEST_URL: ${{ secrets.BETTERSTACK_INGEST_URL }}
+          BETTERSTACK_LOGS_TOKEN: ${{ secrets.BETTERSTACK_LOGS_TOKEN }}
+          BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
           # Optional Better Stack heartbeat — a missed run then raises an alert. No-op if unset.
           TRANSFER_PARTNERS_HEARTBEAT_URL: ${{ secrets.TRANSFER_PARTNERS_HEARTBEAT_URL }}
         run: python transfer_partners.py ${{ inputs.dry_run && '--dry-run' || '' }}
