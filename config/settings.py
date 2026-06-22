@@ -165,4 +165,9 @@ CRON_MAX_LEGS_PER_SHARD: dict[str, int] = {
     "southwest": int(_get("SOUTHWEST_MAX_LEGS_PER_SHARD", "20")),
     "turkish": int(_get("TURKISH_MAX_LEGS_PER_SHARD", "20")),
     "etihad": int(_get("ETIHAD_MAX_LEGS_PER_SHARD", "20")),
+    # Alaska: ~55 MED pairs (110 directed legs). Single Fly IP already scrapes the full
+    # catalogue safely, so a generous cap + a small shard fan-out covers it within a 6h job.
+    "alaska": int(_get("ALASKA_MAX_LEGS_PER_SHARD", "40")),
+    # JetBlue: ~13 pairs (26 directed legs) — one shard covers it.
+    "jetblue": int(_get("JETBLUE_MAX_LEGS_PER_SHARD", "30")),
 }
