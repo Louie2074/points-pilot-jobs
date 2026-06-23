@@ -22,6 +22,7 @@ on:
         default: ""
   schedule:
     - cron: "0 8 * * *"   # daily at 08:00 UTC (clear of transfer-bonuses 09:00)
+    - cron: "0 20 * * *"  # 2nd daily run halves Delta's effective TTL
 
 permissions:
   contents: read
@@ -44,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
       - name: Scrape Delta (headful Chrome under xvfb, Azure IP)
@@ -56,7 +57,7 @@ jobs:
           BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
           DELTA_HEARTBEAT_URL: ${{ secrets.DELTA_HEARTBEAT_URL }}
           DELTA_SCRAPE_DAYS: "30"
-          DELTA_SHARDS: "3"
+          DELTA_SHARDS: "5"
           DELTA_SHARD_INDEX: ${{ matrix.shard }}
           DELTA_ROUTE_ORIGIN: ${{ inputs.origin }}
           DELTA_ROUTE_DEST: ${{ inputs.destination }}

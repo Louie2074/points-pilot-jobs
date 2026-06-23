@@ -116,6 +116,17 @@ ALASKA_MED_ROUTES: list[tuple[str, str]] = [
     ("LAX", "PHX"),
     ("SAN", "SFO"),
     ("ANC", "PDX"),
+    # coverage-expansion 2026-06-23 — international partner nonstops (AS Mileage Plan)
+    ("SEA", "HND"), ("SFO", "HND"), ("LAX", "HND"),   # JAL
+    ("SEA", "NRT"), ("LAX", "NRT"),                     # JAL
+    ("SFO", "HKG"), ("LAX", "HKG"),                     # Cathay
+    ("SFO", "SYD"), ("LAX", "SYD"),                     # Qantas
+    ("SFO", "TPE"), ("LAX", "TPE"),                     # Starlux
+    ("SEA", "LHR"), ("SFO", "LHR"), ("LAX", "LHR"),    # BA
+    # new US origins → existing dests
+    ("DEN", "SEA"), ("DEN", "LAX"), ("DEN", "SFO"),
+    ("PHX", "SEA"), ("AUS", "SEA"), ("MSP", "SEA"),
+    ("SAN", "PDX"), ("SJC", "LAX"), ("GEG", "LAX"),
 ]
 
 # Delta is no longer scraped from this repo — it runs as a nodriver browser scrape in the
@@ -191,6 +202,14 @@ DELTA_MED_ROUTES: list[tuple[str, str]] = [
     ("SEA", "DEN"),
     ("SEA", "LAS"),
     ("LAX", "DEN"),
+    # coverage-expansion 2026-06-23 — SkyTeam intl partners + hub spokes
+    ("DTW", "ICN"), ("ATL", "ICN"),                    # Korean
+    ("JFK", "CDG"), ("ATL", "CDG"),                    # Air France
+    ("DTW", "AMS"), ("ATL", "AMS"),                    # KLM
+    ("ATL", "GRU"),                                    # LATAM
+    ("ATL", "SLC"), ("ATL", "MSP"), ("DTW", "MSP"),
+    ("SLC", "SFO"), ("SLC", "PHX"), ("JFK", "BOS"),
+    ("MSP", "SFO"), ("MSP", "PHX"),
 ]
 
 # Southwest Rapid Rewards — focus cities DEN/MDW/BWI/LAS/PHX/DAL/HOU/OAK/SAN.
@@ -243,6 +262,12 @@ SOUTHWEST_MED_ROUTES: list[tuple[str, str]] = [
     ("SAN", "SMF"),
     ("HOU", "MCO"),
     ("SEA", "OAK"),
+    # coverage-expansion 2026-06-23 — domestic focus-city mesh
+    ("DEN", "AUS"), ("DEN", "TPA"), ("DEN", "MSY"), ("DEN", "BNA"),
+    ("MDW", "DEN"), ("MDW", "TPA"), ("MDW", "AUS"),
+    ("BWI", "MDW"), ("BWI", "ATL"), ("BWI", "SAN"),
+    ("HOU", "DAL"), ("HOU", "DEN"), ("PHX", "DEN"),
+    ("OAK", "PHX"), ("SAN", "PHX"), ("SMF", "LAS"),
 ]
 
 # Turkish Miles&Smiles — US gateways ↔ IST hub (cron-only; long-haul US↔IST).
@@ -269,6 +294,9 @@ TURKISH_MED_ROUTES: list[tuple[str, str]] = [
     ("SLC", "IST"),
     ("PDX", "IST"),
     ("LAS", "IST"),
+    # coverage-expansion 2026-06-23 — more US gateways → IST
+    ("SAN", "IST"), ("AUS", "IST"), ("RDU", "IST"),
+    ("BWI", "IST"), ("MSP", "IST"),
 ]
 
 # Etihad Guest — US gateways ↔ AUH hub (cron-only; long-haul US↔AUH).
@@ -285,6 +313,8 @@ ETIHAD_MED_ROUTES: list[tuple[str, str]] = [
     ("IAH", "AUH"),
     ("ATL", "AUH"),
     ("MIA", "AUH"),
+    # coverage-expansion 2026-06-23 — more US gateways → AUH
+    ("DFW", "AUH"), ("SEA", "AUH"), ("DCA", "AUH"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -308,6 +338,10 @@ JETBLUE_MED_ROUTES: list[tuple[str, str]] = [
     ("BOS", "LAX"),
     ("FLL", "EWR"),
     ("EWR", "MCO"),
+    # coverage-expansion 2026-06-23 — transcon + Caribbean/LatAm + TATL partner
+    ("JFK", "LAX"), ("JFK", "SAN"), ("JFK", "AUS"), ("JFK", "SJU"),
+    ("BOS", "SFO"), ("BOS", "SEA"), ("BOS", "SJU"),
+    ("FLL", "SJU"), ("EWR", "FLL"), ("JFK", "LHR"), ("BOS", "LHR"),
 ]
 
 
@@ -335,6 +369,11 @@ CASH_PINNED_ROUTES: list[tuple[str, str]] = [
     *route_set("PDX", "NYC"),
     *route_set("SFO", "NYC"),
     *route_set("LAX_METRO", "NYC"),
+    # coverage-expansion 2026-06-23 — guarantee day-one CPP for the Explore-facing intl routes
+    # (zero organic demand initially, so they'd be crowded out of the demand-ranked cash queue).
+    ("SEA", "HND"), ("SFO", "HND"), ("LAX", "HND"),
+    ("LAX", "NRT"), ("SFO", "HKG"), ("LAX", "SYD"), ("LAX", "TPE"),
+    ("SEA", "LHR"), ("DTW", "ICN"), ("JFK", "CDG"), ("DTW", "AMS"),
 ]
 
 

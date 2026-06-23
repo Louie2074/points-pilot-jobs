@@ -41,15 +41,14 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
       options: --shm-size=2g
     timeout-minutes: 60
-    # Turkish has 20 directed pairs = 40 legs, but the per-shard cap is 20 — one shard could only
-    # ever cover half the catalogue per day (the queue alternated halves, leaving 20 routes ~48h
-    # stale). Two parallel runs on separate runner IPs stride-shard the scored due-batch
-    # (due[shard::2]), so 2 × 20 = 40 legs = the full catalogue refreshed daily. On-demand
+    # Turkish has ~50 directed legs, but the per-shard cap is 20 — one shard could only
+    # cover part of the catalogue per day. Three parallel runs on separate runner IPs
+    # stride-shard the scored due-batch, so 3 × 20 = 60 legs = full daily coverage. On-demand
     # single-route dispatch still spawns both shards, but only shard 0 does the work.
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v6
       - name: Scrape Turkish (headful Chrome under xvfb, Azure IP)
@@ -61,7 +60,7 @@ jobs:
           BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
           TURKISH_HEARTBEAT_URL: ${{ secrets.TURKISH_HEARTBEAT_URL }}
           TURKISH_SCRAPE_DAYS: "3"
-          TURKISH_SHARDS: "2"
+          TURKISH_SHARDS: "3"
           TURKISH_SHARD_INDEX: ${{ matrix.shard }}
           TURKISH_ROUTE_ORIGIN: ${{ inputs.origin }}
           TURKISH_ROUTE_DEST: ${{ inputs.destination }}

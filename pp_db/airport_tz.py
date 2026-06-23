@@ -6,6 +6,7 @@ and makes the award scrapers drop departure times — add an entry before onboar
 airport. `tests/test_airport_tz.py` guards that every seeded route airport is mapped."""
 
 AIRPORT_TZ: dict[str, str] = {
+    "AMS": "Europe/Amsterdam",   # Amsterdam — Delta/KLM (SkyTeam) origin
     "ANC": "America/Anchorage",
     "ATL": "America/New_York",
     "AUH": "Asia/Dubai",  # Abu Dhabi — Etihad Guest hub (UTC+4, no DST)
@@ -14,6 +15,7 @@ AIRPORT_TZ: dict[str, str] = {
     "BOI": "America/Boise",
     "BOS": "America/New_York",
     "BWI": "America/New_York",
+    "CDG": "Europe/Paris",        # Paris CDG — Delta/Air France (SkyTeam) origin
     "CLT": "America/New_York",
     "DAL": "America/Chicago",
     "DCA": "America/New_York",
@@ -24,11 +26,14 @@ AIRPORT_TZ: dict[str, str] = {
     "FAI": "America/Anchorage",
     "FLL": "America/New_York",
     "GEG": "America/Los_Angeles",
+    "GRU": "America/Sao_Paulo",   # São Paulo — Delta/LATAM (SkyTeam) origin
+    "HKG": "Asia/Hong_Kong",      # Hong Kong — Alaska/Cathay origin
     "HND": "Asia/Tokyo",  # Tokyo Haneda — Alaska partner (JAL) origin
     "HNL": "Pacific/Honolulu",
     "HOU": "America/Chicago",
     "IAD": "America/New_York",
     "IAH": "America/Chicago",
+    "ICN": "Asia/Seoul",          # Seoul Incheon — Delta/Korean (SkyTeam) origin
     "IST": "Europe/Istanbul",  # Istanbul — Turkish hub; needed for cash-matcher origin-local time
     "JFK": "America/New_York",
     "KOA": "Pacific/Honolulu",
@@ -41,6 +46,8 @@ AIRPORT_TZ: dict[str, str] = {
     "MDW": "America/Chicago",
     "MIA": "America/New_York",
     "MSP": "America/Chicago",
+    "MSY": "America/Chicago",     # New Orleans — Southwest spoke
+    "NRT": "Asia/Tokyo",          # Tokyo Narita — Alaska/JAL origin
     "OAK": "America/Los_Angeles",
     "OGG": "Pacific/Honolulu",
     "ORD": "America/Chicago",
@@ -54,8 +61,11 @@ AIRPORT_TZ: dict[str, str] = {
     "SEA": "America/Los_Angeles",
     "SFO": "America/Los_Angeles",
     "SJC": "America/Los_Angeles",
+    "SJU": "America/Puerto_Rico",  # San Juan — JetBlue origin
     "SLC": "America/Denver",
     "SMF": "America/Los_Angeles",  # Sacramento — Southwest focus-city spoke
     "SNA": "America/Los_Angeles",
+    "SYD": "Australia/Sydney",     # Sydney — Alaska/Qantas origin
+    "TPE": "Asia/Taipei",          # Taipei — Alaska/Starlux origin
     "TPA": "America/New_York",
 }
