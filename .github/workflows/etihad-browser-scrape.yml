@@ -41,6 +41,10 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
       options: --shm-size=2g
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
     steps:
       - uses: actions/checkout@v6
       - name: Scrape Etihad (headful Chrome under xvfb, Azure IP)
@@ -52,6 +56,8 @@ jobs:
           BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
           ETIHAD_HEARTBEAT_URL: ${{ secrets.ETIHAD_HEARTBEAT_URL }}
           ETIHAD_SCRAPE_DAYS: "3"
+          ETIHAD_SHARDS: "2"
+          ETIHAD_SHARD_INDEX: ${{ matrix.shard }}
           ETIHAD_ROUTE_ORIGIN: ${{ inputs.origin }}
           ETIHAD_ROUTE_DEST: ${{ inputs.destination }}
           ETIHAD_ROUTE_DATES: ${{ inputs.dates }}
