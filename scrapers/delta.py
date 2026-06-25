@@ -37,22 +37,44 @@ logger = logging.getLogger(__name__)
 _API_URL = "https://offer-api-prd.delta.com/prd/rm-offer-gql"
 
 # Delta brand IDs (offer.additionalOfferProperties.dominantSegmentBrandId and
-# fareInformation.brandByFlightLegs[].brandId) → canonical cabin class. Delta's brand
-# naming has drifted over the years, so we match on substrings of the upper-cased brand id.
-# Order matters: check the most specific tokens first (DELTA ONE before "ONE"-less tokens).
+# fareInformation.brandByFlightLegs[].brandId) → canonical cabin class. We match on substrings
+# of the upper-cased brand id.
+#
+# Delta's live offer API does NOT use verbose names like "DELTA_ONE"; it uses short prefixed
+# brand codes (captured JFK-CDG 2026-06-25): CD1=Delta One, CDPS=Delta Premium Select,
+# CFIRST=domestic First, CMAIN/BMAIN=Main/Basic economy, CDCP=Comfort+. Partner-operated SkyTeam
+# legs carry the partner's codes (e.g. Air France AFST=business/SkyTeam, AFPE=premium economy).
+# We must match these real codes or the premium cabins resolve to None and get dropped — which is
+# exactly why business never landed (CD1 matched no rule → Delta One silently lost).
+#
+# Order matters: the table is scanned top-down and the FIRST substring hit wins, so list the most
+# specific / most premium tokens first. In particular DELTA-ONE/business and the premium-economy
+# tokens must precede the bare "FIRST" token, because a Delta One itinerary that connects through a
+# domestic-First leg exposes a "CFIRST" leg brand whose "FIRST" substring would otherwise hijack
+# the cabin (the old bug). Within a single id the first matching token decides, so e.g. "CDCP"
+# (Comfort+) is caught by the economy "DCP" token before anything else.
 _CABIN_RULES: tuple[tuple[str, str], ...] = (
+    # --- Delta One / business (most premium first) ---
     ("DELTA_ONE", "business"),
     ("DELTAONE", "business"),
     ("DELTA ONE", "business"),
+    ("CD1", "business"),  # live Delta One brand code (e.g. "CD1") — transatlantic/-pacific business
+    ("AFST", "business"),  # Air France SkyTeam-partner business leg (SkyTeam "ST")
     ("BUSINESS", "business"),
-    ("FIRST", "first"),  # Domestic First / First Class
-    ("COMFORT", "economy"),  # Delta Comfort+ — extra-legroom ECONOMY, not a separate cabin
-    ("DCP", "economy"),  # Delta Comfort+ branded-fare code (e.g. CDCP), seen live — economy
+    # --- Premium economy (must precede the bare "FIRST"/"MAIN" tokens) ---
+    ("CDPS", "premium_economy"),  # live Delta Premium Select brand code
     ("PREMIUM_SELECT", "premium_economy"),  # Delta Premium Select (long-haul PE)
     ("PREMIUM SELECT", "premium_economy"),
+    ("AFPE", "premium_economy"),  # Air France partner premium-economy leg
     ("PREMIUM", "premium_economy"),
+    # --- Comfort+ is extra-legroom ECONOMY, NOT a separate cabin (must precede "FIRST"/"MAIN") ---
+    ("COMFORT", "economy"),  # Delta Comfort+ — extra-legroom ECONOMY, not a separate cabin
+    ("DCP", "economy"),  # Comfort+ branded-fare code (e.g. CDCP), seen live — economy
+    # --- First (domestic First) — AFTER the premium tokens so a "CFIRST" leg can't steal Delta One.
+    ("FIRST", "first"),  # Domestic First / First Class (live code "CFIRST")
+    # --- Economy ---
     ("BASIC", "economy"),  # Basic Economy
-    ("MAIN", "economy"),  # Main Cabin
+    ("MAIN", "economy"),  # Main Cabin (live codes "CMAIN"/"BMAIN")
     ("ECONOMY", "economy"),
 )
 
@@ -66,6 +88,28 @@ def _brand_to_cabin(brand_id: object) -> str | None:
         if token in key:
             return cabin
     return None
+
+
+# Cabin precedence for the per-leg fallback (used ONLY when the offer-level dominant brand is
+# unknown). Delta One (business) ranks ABOVE domestic First on purpose: a Delta One long-haul that
+# connects through a domestic-First hub exposes legs of two cabins (["CFIRST", "CD1"]) and is sold
+# as the Delta One product, so business must win over the incidental domestic-First connector.
+# (Pure domestic First itineraries have every leg "first", so this never down-ranks a real First.)
+_CABIN_RANK: dict[str, int] = {
+    "business": 4,
+    "first": 3,
+    "premium_economy": 2,
+    "economy": 1,
+}
+
+
+def _most_premium_cabin(cabins: list[str]) -> str | None:
+    """Return the highest-precedence cabin among the given canonical cabins (per _CABIN_RANK),
+    or None if empty. Used only when the offer's dominant brand is unknown."""
+    ranked = [c for c in cabins if c in _CABIN_RANK]
+    if not ranked:
+        return None
+    return max(ranked, key=lambda c: _CABIN_RANK[c])
 
 
 def _parse_iso(s: object, iata: str) -> datetime | None:
@@ -331,13 +375,16 @@ class DeltaScraper(BrowserScraper):
         brands = fare_info.get("brandByFlightLegs") or []
         brand_ids = [b.get("brandId") for b in brands if isinstance(b, dict) and b.get("brandId")]
 
-        # Cabin: prefer the offer-level dominant brand, fall back to the per-leg brand.
+        # Cabin: trust the offer-level dominant brand first — it names the offer's actual cabin
+        # (e.g. "CD1" Delta One) and is correct even on connecting itineraries. Only when the
+        # dominant brand is missing/unknown do we fall back to the per-leg brands, and then we
+        # pick the MOST PREMIUM leg cabin rather than the first leg. A Delta One itinerary that
+        # connects through a domestic-First hub lists legs ["CFIRST", "CD1"]; taking the first leg
+        # would mislabel Delta One as "first", so we keep the most premium across all legs.
         cabin = _brand_to_cabin(dominant_brand)
         if cabin is None:
-            for bid in brand_ids:
-                cabin = _brand_to_cabin(bid)
-                if cabin:
-                    break
+            leg_cabins = [c for c in (_brand_to_cabin(bid) for bid in brand_ids) if c]
+            cabin = _most_premium_cabin(leg_cabins)
         if cabin is None:
             logger.debug(
                 "[DL] Unrecognised brand(s) %r / dominant %r — skipping",
