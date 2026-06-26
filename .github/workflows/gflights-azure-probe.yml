@@ -28,15 +28,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      # Separate fast step so the shipped versions + whether the pin applied flush to a readable
+      # log even if the scrape step hangs. The :latest image's scraper-package floating dep can win
+      # over requirements.txt and pull websockets>=15, which crashes nodriver's listener under heavy
+      # evaluate() polling; force the known-good 14.x line. Persists into the next step (same job
+      # container). The real migration rebuilds the image with this pin baked in.
+      - name: Env + pin websockets (fast — gives version truth)
+        run: |
+          python -c "import websockets, nodriver; print('VERSIONS before: websockets', websockets.__version__, '| nodriver', nodriver.__version__)"
+          pip install --no-cache-dir 'websockets>=14,<15'
+          python -c "import websockets; print('VERSIONS after: websockets', websockets.__version__)"
       - name: Probe Google Flights (headful Chrome under xvfb, Azure IP)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          python -c "import websockets, nodriver; print('VERSIONS before: websockets', websockets.__version__, '| nodriver', nodriver.__version__)"
-          # The :latest image ships websockets>=15 (the scraper package's floating dep wins over
-          # requirements.txt), which crashes nodriver's listener under heavy evaluate() polling.
-          # Force the known-good 14.x line (matches requirements.txt). The real migration rebuilds
-          # the image with this pin baked in.
-          pip install --no-cache-dir 'websockets>=14,<15' 2>&1 | tail -2
-          python -c "import websockets; print('VERSIONS after: websockets', websockets.__version__)"
-          xvfb-run -a python gflights_probe.py
+        run: xvfb-run -a python gflights_probe.py
