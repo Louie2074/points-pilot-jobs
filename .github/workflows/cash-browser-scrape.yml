@@ -1,0 +1,50 @@
+name: cash-browser-scrape
+
+# Google Flights CASH-fare browser scrape, run entirely within this repo (GH Actions / Azure IP
+# serves Google Flights cleanly at volume). The scrapers/ config/ pp_db/ pipeline/ packages are
+# VENDORED from points-pilot-scrapers (see VENDORED_DELTA.md), so no cross-repo checkout / PAT is
+# needed. Headful Chrome under xvfb. Sharded across parallel runs (a whole route stays on one
+# shard) — coverage → scrape → match → upsert into Postgres `pp.cash_fares` (powers CPP).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 6 * * *"   # daily at 06:15 UTC (clear of the award scrapes 08-11 + 20)
+    - cron: "15 18 * * *"  # 2nd daily run halves the effective cash TTL
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: cash-browser-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/louie2074/points-pilot-jobs-scraper:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --shm-size=2g
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Scrape Google Flights cash fares (headful Chrome under xvfb, Azure IP)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
+          BETTERSTACK_INGEST_URL: ${{ secrets.BETTERSTACK_INGEST_URL }}
+          BETTERSTACK_LOGS_TOKEN: ${{ secrets.BETTERSTACK_LOGS_TOKEN }}
+          BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
+          GFLIGHTS_HEARTBEAT_URL: ${{ secrets.GFLIGHTS_HEARTBEAT_URL }}
+          CASH_SHARDS: "4"
+          CASH_SHARD_INDEX: ${{ matrix.shard }}
+          CASH_SCRAPE_DAYS: "30"
+          CASH_TOP_ROUTES: "600"
+        run: xvfb-run -a python cash_browser_scrape.py
