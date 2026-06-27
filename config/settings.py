@@ -64,6 +64,8 @@ FORCE_RESCRAPE_ON_START: bool = _get("FORCE_RESCRAPE_ON_START", "false").lower()
 # Better Stack heartbeat ping URL — the refresh job pings this after each run so
 # a dead scraper is detected (period 60m / grace 20m). Unset = no-op.
 SCRAPER_HEARTBEAT_URL: str = _get("SCRAPER_HEARTBEAT_URL", "")
+# Separate heartbeat for the Google Flights cash scraper (its own Fly app). Unset = no-op.
+GFLIGHTS_HEARTBEAT_URL: str = _get("GFLIGHTS_HEARTBEAT_URL", "")
 # Emit one structured `scrape_route` metric per route per run (records upserted,
 # dates covered/failed, per-cabin breakdown) so coverage gaps and per-route drops
 # are queryable in Better Stack. ON by default; set false to cut metric volume.
@@ -100,12 +102,48 @@ TTL_HOURS: dict[str, int] = {
 }
 
 # ---------------------------------------------------------------------------
-# Alaska cash-fare scraper (CPP) — scraper-only; runs on the shared 3h cadence (staggered)
+# Google Flights cash-fare scraper (CPP) — sharded GH-Actions cron (cash_browser_scrape.py)
 # ---------------------------------------------------------------------------
-CASH_TTL_HOURS: int = int(_get("CASH_TTL_HOURS", "48"))
-CASH_TOP_ROUTES: int = int(_get("CASH_TOP_ROUTES", "20"))
+# Cash freshness TTL (hours). 72 (was 48) cuts the per-unit re-scrape rate by a third so the
+# whole coverable universe fits current throughput across the full 30-day horizon (the 15-30d
+# tail was starved at 48h). Cash fares drift little day-to-day, so 72h is fine for a CPP signal;
+# pair with a freshness label in the UI. 96h is held in reserve if the universe outgrows capacity.
+CASH_TTL_HOURS: int = int(_get("CASH_TTL_HOURS", "72"))
+CASH_TOP_ROUTES: int = int(_get("CASH_TOP_ROUTES", "80"))
 CASH_REFRESH_INTERVAL_MIN: int = int(_get("CASH_REFRESH_INTERVAL_MIN", "180"))
-CASH_SCRAPE_DAYS: int = int(_get("CASH_SCRAPE_DAYS", "7"))
+# Minimum rest (minutes) between cash runs when sleeping a fixed period. Floors the post-run
+# sleep so an over-long run can't make the next run start back-to-back (a new regime; Google has
+# no WAF wall here, but we still want a breather).
+CASH_MIN_REST_MIN: int = int(_get("CASH_MIN_REST_MIN", "10"))
+# Cash horizon (days ahead). Awards are searched up to ~30 days out densely (beyond that the
+# award scrapers sample only a sparse tail), so 30 covers essentially the whole matchable award
+# window — vs 7, which left every search >1 week out with no CPP. The eligible universe (~2.4k
+# economy-nonstop route/dates) still fits the gflights ceiling: 48h TTL ⇒ ~1.2k scrapes/day vs
+# ~1.6k/day capacity (CASH_TOP_ROUTES=400 × 4 runs); the query orders by date ASC so near-term
+# stays freshest and the tail fills with leftover slots.
+CASH_SCRAPE_DAYS: int = int(_get("CASH_SCRAPE_DAYS", "30"))
+# Cash↔award departure-time match tolerance (minutes). Most carriers match to the minute, but
+# Delta's Google time runs ~10-30 min off the award time, so 20 captures that skew while staying
+# well under the inter-flight gap (~60 min). Same-carrier nonstop siblings average 112-472 min
+# apart (so a wrong second flight almost never sits inside 20 min); ties break deterministically
+# in cash_matcher. A systematic tz bug still surfaces as 0 matches, not silent wrong matches.
+CASH_MATCH_TOLERANCE_MIN: int = int(_get("CASH_MATCH_TOLERANCE_MIN", "20"))
+# Negative memory: a (route,date) that yielded ZERO matchable cash is skipped for this many days
+# before it's re-probed, so zero-yield pairs stop consuming a scrape slot every run.
+CASH_ZERO_REPROBE_DAYS: int = int(_get("CASH_ZERO_REPROBE_DAYS", "3"))
+# Cabins the cash scraper covers. economy/business/first via the NL text query ("First class …"
+# for first); premium economy via the tfs protobuf (NL can't select it). Premium economy AND first
+# are the large, low-yield cabins, so they are DEMOTED (scraped every CASH_PE_EVERY_N-th run) to
+# fit the existing capacity rather than ~doubling per-run load.
+CASH_CABINS: tuple[str, ...] = tuple(
+    c.strip()
+    for c in _get("CASH_CABINS", "economy,business,premium_economy,first").split(",")
+    if c.strip()
+)
+# Demote the slow cabins (premium economy + first): scrape them only every Nth cash run (not every
+# run). They are the slowest, lowest-yield cabins, so this frees slots for the econ/biz tail
+# without zeroing their coverage. 1 = every run (no demotion). See cabins_for_run.
+CASH_PE_EVERY_N: int = int(_get("CASH_PE_EVERY_N", "4"))
 
 # ---------------------------------------------------------------------------
 # Adaptive scheduling (vendored from scraper; Phase 2 cron unification)

@@ -157,6 +157,10 @@ AND NOT EXISTS (
       AND cc.cabin = f.cabin_class
       AND cc.fare_count = 0 AND cc.next_probe_utc > now()
 )
+-- Shard filter: keep a WHOLE route (all its dates+cabins) on ONE shard by hashing only
+-- origin||'-'||dest. shard_count=1 short-circuits (no restriction) so single-shard / Fly
+-- callers behave identically.
+AND (:shard_count = 1 OR abs(hashtextextended(f.origin || '-' || f.destination, 0)) % :shard_count = :shard_index)
 ORDER BY {pin_rank},
          COALESCE(cov.last_attempt_utc, TIMESTAMP '1970-01-01') ASC,
          COALESCE(d.sc, 0) DESC, f.date ASC, f.origin ASC, f.destination ASC
@@ -170,6 +174,8 @@ def get_top_cash_routes(
     days_ahead: int,
     ttl_hours: int,
     cabins: tuple[str, ...] = ("economy",),
+    shard_index: int = 0,
+    shard_count: int = 1,
 ) -> list[tuple[str, str, date, str]]:
     """Route/date/cabin units to scrape for cash.
 
@@ -177,6 +183,11 @@ def get_top_cash_routes(
     enabled ``cabins`` within ``days_ahead`` days AND lack fresh cash (no cash_fares row within
     ``ttl_hours``) AND are not a fresh zero-yield negative-memory entry. Ranked pinned-first, then
     summed route demand DESC, then date/origin/dest ASC. Returns (origin, dest, date, cabin).
+
+    ``shard_index`` / ``shard_count`` partition the work across parallel runs: a route (and all its
+    dates+cabins) is kept on exactly one shard via ``abs(hashtextextended(origin||'-'||dest, 0)) %
+    shard_count == shard_index``. The default ``shard_count=1`` short-circuits the filter, so the
+    Fly loop and any other unsharded caller behave exactly as before.
     """
     from config.routes import CASH_PINNED_ROUTES
 
@@ -189,6 +200,8 @@ def get_top_cash_routes(
         "days_ahead": days_ahead,
         "ttl_hours": ttl_hours,
         "limit": limit,
+        "shard_index": shard_index,
+        "shard_count": shard_count,
     }
     if pinned:
         pin_keys = [f"pin_{i}" for i in range(len(pinned))]
