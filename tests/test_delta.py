@@ -229,3 +229,27 @@ def test_normalize_domestic_first_stays_first():
     recs = DeltaScraper().normalize(raw, "ATL", "BOS", date(2026, 7, 23))
     assert len(recs) == 1
     assert recs[0].cabin_class == "first"
+
+
+# --- Null / empty GraphQL responses must not crash -----------------------------------------------
+# Delta returns an explicit null at some level (e.g. {"data": null} or
+# {"data": {"gqlSearchOffers": null}}) for routes/dates with no offers or a soft error. dict.get
+# returns the stored null (NOT the default) when the key is present, so a naive
+# .get("data", {}).get(...) chain would do None.get(...) and raise
+# `'NoneType' object has no attribute 'get'`, silently dropping that route's data. normalize() must
+# treat every such response as "no offers" and return [] without raising.
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"data": None},  # top-level data is explicitly null
+        {"data": {"gqlSearchOffers": None}},  # gqlSearchOffers is explicitly null
+        {"data": {"gqlSearchOffers": {"gqlOffersSets": None}}},  # gqlOffersSets is explicitly null
+        {"data": {"gqlSearchOffers": {}}},  # gqlOffersSets key missing
+        {"data": {"gqlSearchOffers": {"gqlOffersSets": []}}},  # empty offer sets
+        {"data": {}},  # gqlSearchOffers key missing
+        {},  # empty body
+    ],
+)
+def test_normalize_null_response_returns_empty(raw):
+    recs = DeltaScraper().normalize(raw, "SEA", "LAX", date(2026, 7, 23))
+    assert recs == []

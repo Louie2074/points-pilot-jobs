@@ -218,7 +218,14 @@ class DeltaScraper(BrowserScraper):
         if not raw:
             return []
 
-        offer_sets = raw.get("data", {}).get("gqlSearchOffers", {}).get("gqlOffersSets") or []
+        # Null-safe at every level: Delta returns an explicit null (e.g. {"data": null} or
+        # {"data": {"gqlSearchOffers": null}}) for no-offer routes/dates and soft errors. A present
+        # key whose value is null makes dict.get return that null (not the default), so a naive
+        # .get("k", {}).get(...) chain would do None.get(...) and raise AttributeError, silently
+        # dropping that route. `(x.get("k") or {})` handles both a missing key AND an explicit null.
+        offer_sets = (
+            ((raw.get("data") or {}).get("gqlSearchOffers") or {}).get("gqlOffersSets") or []
+        )
         if not offer_sets:
             return []
 
