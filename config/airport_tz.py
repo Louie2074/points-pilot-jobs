@@ -25,8 +25,8 @@ AIRPORT_TZ: dict[str, str] = {
     "DFW": "America/Chicago",
     "DOH": "Asia/Qatar",  # Doha — Alaska/Qatar (oneworld) origin (UTC+3, no DST)
     "DTW": "America/New_York",
-    "EZE": "America/Argentina/Buenos_Aires",  # Buenos Aires Ezeiza — JetBlue route timezone
     "EWR": "America/New_York",
+    "EZE": "America/Argentina/Buenos_Aires",  # Buenos Aires Ezeiza — JetBlue route timezone
     "FAI": "America/Anchorage",
     "FLL": "America/New_York",
     "GEG": "America/Los_Angeles",
