@@ -17,7 +17,7 @@ on:
         required: false
         default: ""
       dates:
-        description: "Comma-separated ISO dates (YYYY-MM-DD). Blank = near-term window."
+        description: "Comma-separated ISO dates (YYYY-MM-DD). Blank = near-term 5-day window."
         required: false
         default: ""
   schedule:
@@ -55,7 +55,7 @@ jobs:
           BETTERSTACK_LOGS_TOKEN: ${{ secrets.BETTERSTACK_LOGS_TOKEN }}
           BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
           ETIHAD_HEARTBEAT_URL: ${{ secrets.ETIHAD_HEARTBEAT_URL }}
-          ETIHAD_SCRAPE_DAYS: "3"
+          ETIHAD_SCRAPE_DAYS: "5"
           ETIHAD_SHARDS: "2"
           ETIHAD_SHARD_INDEX: ${{ matrix.shard }}
           ETIHAD_ROUTE_ORIGIN: ${{ inputs.origin }}

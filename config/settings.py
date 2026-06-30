@@ -191,7 +191,8 @@ CRON_MAX_LEGS_PER_SHARD: dict[str, int] = {
     # (40 legs × 29 dates ≈ 1160 req/IP/run runs clean — Azure probe 0 blocks).
     "alaska": int(_get("ALASKA_MAX_LEGS_PER_SHARD", "40")),
     # JetBlue: 46 MED pairs (92 directed legs after the Mint business expansion, POI-20 lever #3).
-    # 36/shard × 3 shards = 108 candidate pool/run covers the 92 directed + LOW on-demand tail.
+    # 36/shard × 4 shards = 144 candidate pool/run covers the 92 directed set plus the LOW
+    # on-demand tail with margin after the measured four-shard Actions density bump.
     # 36 legs × 24 dates ≈ 864 req/IP/run — below Alaska's clean 1160, so WAF-safe on httpx.
     "jetblue": int(_get("JETBLUE_MAX_LEGS_PER_SHARD", "36")),
 }

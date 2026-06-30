@@ -22,6 +22,7 @@ AIRPORT_TZ: dict[str, str] = {
     "DEN": "America/Denver",
     "DFW": "America/Chicago",
     "DTW": "America/New_York",
+    "EZE": "America/Argentina/Buenos_Aires",  # Buenos Aires Ezeiza — JetBlue route timezone
     "EWR": "America/New_York",
     "FAI": "America/Anchorage",
     "FLL": "America/New_York",

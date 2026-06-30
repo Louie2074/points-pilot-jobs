@@ -13,6 +13,10 @@ Scheduled GitHub Actions jobs for point_pilot. Two kinds of job, all writing to 
    - **httpx** (`alaska_scrape.py` / `jetblue_scrape.py`): plain httpx, no browser — migrated off the
      always-on `point-pilot-scraper` Fly box to free sharded GH-Actions crons. The API box still
      runs each airline's on-demand inline scrape independently.
+3. **Google Flights cash scraper** — `.github/workflows/cash-browser-scrape.yml` is the primary
+   scheduled cash-fare path now. `cash_browser_scrape.py` runs the bounded, sharded GitHub Actions
+   batch; `point-pilot-gflights` / `google_flights_main.py` is legacy bake-in only and should stay
+   stopped or scaled down once Actions coverage is verified so metrics and scrape volume stay clean.
 
 Start with `README.md` for the job catalogue + schedules. This file is the working guide.
 

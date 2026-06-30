@@ -13,8 +13,9 @@ the SAME cash primitives as ``run_once`` — coverage → scrape → match → u
   * hard-exits with ``os._exit(0)`` after a brief flush (nodriver leaves pending asyncio tasks that
     otherwise keep the interpreter alive — same reason the award browser scrapes do).
 
-Leave ``google_flights_main.py`` (the Fly path) untouched — both upsert ``pp.cash_fares`` on the
-same natural key, so GA can bake in parallel with Fly with no double-write.
+The GitHub Actions workflow is now the primary scheduled Google Flights cash path. The old
+``google_flights_main.py`` Fly runner is a legacy/bake-in path only; keep it stopped or scaled
+down once Actions coverage is verified so it does not double-scrape or emit confusing metrics.
 """
 
 from __future__ import annotations
