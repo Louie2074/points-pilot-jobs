@@ -10,7 +10,7 @@ Fail-closed: HTTP non-2xx or parse error → raises → non-zero exit → workfl
 failure notification. Zero bonuses is valid — deletes all tracked bonuses and
 inserts nothing (no active bonuses right now).
 
-Requires DATABASE_URL (Postgres). BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
+Requires DATABASE_URL (Postgres). Optional OTLP settings enable Grafana Cloud telemetry.
 """
 
 from __future__ import annotations

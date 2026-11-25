@@ -14,7 +14,7 @@ Fail-closed: HTTP non-2xx or "no managed bank tables found at all" raises → no
 exit → workflow failure. A bank section that maps to zero rows just contributes
 nothing (pure snapshot).
 
-Requires DATABASE_URL (Postgres). BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
+Requires DATABASE_URL (Postgres). Optional OTLP settings enable Grafana Cloud telemetry.
 """
 
 from __future__ import annotations

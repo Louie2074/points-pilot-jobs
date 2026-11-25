@@ -44,5 +44,4 @@ jobs:
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
           OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
           OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-          # Optional Better Stack heartbeat — a missed run then raises an alert. No-op if unset.
         run: python transfer_bonuses.py ${{ inputs.dry_run && '--dry-run' || '' }}
