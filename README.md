@@ -25,8 +25,8 @@ database (the `pp` schema) through the vendored **`pp_db`** data layer (`DATABAS
 Delta monthly day 1 08:00 x1 recovery probe, Southwest 09:00 x1, Turkish monthly day 1 10:00 x1, Etihad 11:00 x2). Planned peak
 overlap can reach roughly 13 jobs, still under the 20-job ceiling. -->
 
-`obs.py` is the shared Better Stack shipper used by the transfer jobs; the browser
-scrapers use the vendored `pipeline/obs.py`. `conftest.py` holds shared pytest fixtures.
+The transfer jobs and browser scrapers share the Grafana Cloud exporter in `pipeline/obs.py`.
+`conftest.py` holds shared pytest fixtures.
 
 Stale-row retention (formerly the daily `cleanup_flights.py` GH-Action) now runs as a Supabase
 **pg_cron** job (`pp-retention`) in the Postgres database itself, so it isn't a job in this repo.
@@ -49,10 +49,10 @@ Each entrypoint is a **thin config** — its route list, `<AIRLINE>_*` env vars,
 `scrapers/<airline>.py` Scraper class — calling the shared
 [`browser_scrape_common.run_scrape()`](browser_scrape_common.py) (the module name is historical; the
 two httpx scrapers reuse it too). The shared module owns the run plan (scored-queue cron drain /
-single-route on-demand / sharding), the scrape loop, the `scrape_run` Better Stack metric, the
-freshness snapshot, and status-aware heartbeat ping, so all six behave identically. Every run emits
-`healthy`, `partial`, `blocked`, or `failed`. A heartbeat requires healthy cron execution or
-completed on-demand work; idle on-demand matrix shards never signal success.
+single-route on-demand / sharding), the scrape loop, and the `scrape_run` event with a freshness
+snapshot. The run status is `healthy`, `partial`, `blocked`, or `failed`. For a data-health alert,
+query `data_health_confirmed=true`. This requires validated source progress or evidence of
+unexpired source rows in a healthy run.
 
 Each entrypoint accepts on-demand `workflow_dispatch` inputs (`origin`, `destination`, `dates`) for
 a single-route run, and `<AIRLINE>_SCRAPE_DAYS` / `<AIRLINE>_SHARDS` env tuning. **Sharding** (a
@@ -92,8 +92,8 @@ python transfer_bonuses.py            # scrape + snapshot-replace
 python transfer_bonuses.py --dry-run  # fetch + parse, skip the DELETE/INSERT
 ```
 
-Ships a `transfer_bonuses_run` completion metric + WARNING+ logs to Better Stack when
-`BETTERSTACK_SOURCE_TOKEN` is set (via `obs.py`); no token → no-op.
+Ships a `transfer_bonuses_run` completion event and warning/error logs to Grafana when the
+OTLP exporter is configured.
 
 ### `transfer_partners.py`
 
@@ -119,8 +119,8 @@ python transfer_partners.py --dry-run  # fetch + parse, skip the DELETE/INSERT
 Ships a `transfer_partners_run` completion metric (`ok`, `deleted`, `inserted`,
 `banks_found`, `banks_missing`, `airline_rows_seen`, `rows_skipped_hotel`,
 `rows_skipped_unmapped`, `rows_ratio_dropped`, `duration_s`, `dry_run`) plus
-per-bank parse breakdowns in the logs when `BETTERSTACK_SOURCE_TOKEN` is set.
-Optional `TRANSFER_PARTNERS_HEARTBEAT_URL` pings on a successful real run.
+per-bank parse breakdowns in logs when the OTLP exporter is configured. For alerts about a
+missed successful run, query the completion event with `ok=true` and `dry_run=false`.
 
 ## Setup
 
@@ -139,15 +139,8 @@ Add these as repository secrets (Settings → Secrets and variables → Actions)
 | Secret | Required | Purpose |
 |---|---|---|
 | `DATABASE_URL` | yes | Supabase Postgres connection string (Supavisor transaction pooler, port 6543) — `pp_db.engine` reads it |
-| `BETTERSTACK_SOURCE_TOKEN` | no | Enables the completion metric + log shipping; reuse the scraper's source token |
-| `BONUSES_HEARTBEAT_URL` | no | Better Stack heartbeat for the transfer-bonuses run |
-| `TRANSFER_PARTNERS_HEARTBEAT_URL` | no | Better Stack heartbeat for the transfer-partners run |
-| `DELTA_HEARTBEAT_URL` | no | Better Stack heartbeat for the monthly Delta browser scrape |
-| `SOUTHWEST_HEARTBEAT_URL` | no | Better Stack heartbeat for the daily Southwest browser scrape |
-| `TURKISH_HEARTBEAT_URL` | no | Better Stack heartbeat for the monthly Turkish browser scrape |
-| `ETIHAD_HEARTBEAT_URL` | no | Better Stack heartbeat for the daily Etihad browser scrape |
-| `ALASKA_HEARTBEAT_URL` | no | Better Stack heartbeat for the Alaska httpx scrape |
-| `JETBLUE_HEARTBEAT_URL` | no | Better Stack heartbeat for the JetBlue httpx scrape |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | for Grafana export | Base OTLP URL from Grafana Cloud |
+| `OTEL_EXPORTER_OTLP_HEADERS` | for Grafana export | Grafana Cloud OTLP authorization header |
 
 The workflows also expose a manual **Run workflow** button (`workflow_dispatch`)
 with a `dry_run` toggle.

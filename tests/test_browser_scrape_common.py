@@ -88,7 +88,7 @@ def test_run_scrape_queue_mode_marks_adaptively(clean_routes):
         source="delta",
         service="point-pilot-delta",
         airline="delta",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         route_jobs=route_jobs,
     )
@@ -129,7 +129,7 @@ def test_run_scrape_queue_mode_blocked_route_stays_due(clean_routes):
         source="delta",
         service="point-pilot-delta",
         airline="delta",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         route_jobs=route_jobs,
     )
@@ -184,7 +184,7 @@ def test_run_scrape_queue_mode_metric_includes_block_details_and_queue_pressure(
         source="delta",
         service="point-pilot-delta",
         airline="delta",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         route_jobs=route_jobs,
     )
@@ -228,7 +228,7 @@ def test_run_scrape_queue_mode_metric_uses_actual_due_backlog(monkeypatch, clean
         source="delta",
         service="point-pilot-delta",
         airline="delta",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         route_jobs=route_jobs,
     )

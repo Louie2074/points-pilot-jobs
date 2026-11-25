@@ -28,14 +28,11 @@ import nodriver as uc
 from bs4 import BeautifulSoup
 from sqlalchemy import Connection, text
 
-from obs import flush, install_log_shipping, ping_heartbeat, ship_metric
+from pipeline.obs import flush, install_log_shipping, ship_metric
 from pp_db import queries as pq
 
 logger = logging.getLogger("transfer_bonuses")
 
-# Optional Better Stack heartbeat — a missed run then raises an alert.
-# No-op unless BONUSES_HEARTBEAT_URL is set.
-BONUSES_HEARTBEAT_URL = os.getenv("BONUSES_HEARTBEAT_URL", "")
 
 
 
@@ -384,9 +381,6 @@ def main() -> int:
             }
         )
         flush()
-        # Heartbeat only on a successful real run (dry-runs are manual).
-        if ok and not args.dry_run:
-            ping_heartbeat(BONUSES_HEARTBEAT_URL, logger)
 
 
 if __name__ == "__main__":

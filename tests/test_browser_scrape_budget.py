@@ -2,7 +2,7 @@
 
 A long scheduled cron used to run until its whole shard slice drained, which on AS/B6
 overran the GitHub-Actions 60-minute job cap and got hard-cancelled mid-run — losing the
-``scrape_run`` metric + heartbeat and leaving in-flight routes unmarked. ``run_scrape`` now
+``scrape_run`` event and leaving in-flight routes unmarked. ``run_scrape`` now
 stops cleanly between routes once ``time_budget_s`` is reached, ships its metric, and exits;
 the routes it didn't reach simply stay due for the next run.
 
@@ -41,18 +41,12 @@ def _stub_io(monkeypatch, freshness_snapshot=None):
     monkeypatch.setattr("pipeline.obs.ship_metric", lambda payload: metrics.append(payload))
     snapshot = dict(freshness_snapshot or {})
     monkeypatch.setattr(common, "freshness", lambda *a, **k: dict(snapshot))
-    heartbeats: list[str] = []
-    monkeypatch.setattr(
-        common,
-        "ping_heartbeat",
-        lambda url, _logger: heartbeats.append(url),
-    )
     monkeypatch.setattr("pp_db.autocommit.close_connection", lambda: None)
-    return metrics, heartbeats
+    return metrics
 
 
 def test_run_scrape_stops_before_scraping_when_budget_exhausted(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
     scraper = _FakeScraper()
 
     outcome = common.run_scrape(
@@ -62,7 +56,7 @@ def test_run_scrape_stops_before_scraping_when_budget_exhausted(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         time_budget_s=0,  # already over budget -> stop before the first route
     )
@@ -76,11 +70,11 @@ def test_run_scrape_stops_before_scraping_when_budget_exhausted(monkeypatch):
     assert metrics[0]["routes_scraped"] == 0
     assert metrics[0]["stopped_early"] is True
     assert metrics[0]["status"] == "partial"
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
 def test_run_scrape_completes_all_routes_within_generous_budget(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
     scraper = _FakeScraper()
 
     outcome = common.run_scrape(
@@ -90,7 +84,7 @@ def test_run_scrape_completes_all_routes_within_generous_budget(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         time_budget_s=3600,  # plenty of headroom -> no early stop
     )
@@ -101,11 +95,11 @@ def test_run_scrape_completes_all_routes_within_generous_budget(monkeypatch):
     assert metrics[0]["status"] == "healthy"
     assert outcome.status == "healthy"
     assert outcome.exit_code == 0
-    assert heartbeats == [""]
+    assert metrics[0]["data_health_confirmed"] is True
 
 
 def test_run_scrape_metric_counts_zero_record_routes(monkeypatch):
-    metrics, _heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
     scraper = _FakeScraper()
 
     common.run_scrape(
@@ -115,7 +109,7 @@ def test_run_scrape_metric_counts_zero_record_routes(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         time_budget_s=3600,
     )
@@ -129,7 +123,7 @@ def test_run_scrape_queue_mode_blocked_route_sets_backoff_and_metric_fields(monk
     import pipeline.queue_manager as queue_manager
     from scrapers.base import ScraperBlockedError
 
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
     blocked_calls: list[tuple[str, str, str, int]] = []
 
     class _BlockingScraper:
@@ -166,7 +160,7 @@ def test_run_scrape_queue_mode_blocked_route_sets_backoff_and_metric_fields(monk
         source="jetblue",
         service="point-pilot-jetblue",
         airline="jetblue",
-        heartbeat_url="",
+
         logger=logging.getLogger("t"),
         route_jobs=route_jobs,
         time_budget_s=3600,
@@ -185,11 +179,11 @@ def test_run_scrape_queue_mode_blocked_route_sets_backoff_and_metric_fields(monk
     assert metrics[0]["status"] == "blocked"
     assert outcome.status == "blocked"
     assert outcome.exit_code == 1
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
 def test_run_scrape_failed_when_every_response_errors(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
 
     class _FailingScraper:
         def scrape(self, origin, dest, travel):
@@ -205,7 +199,7 @@ def test_run_scrape_failed_when_every_response_errors(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/secret",
+
         logger=logging.getLogger("t"),
         time_budget_s=3600,
     )
@@ -214,11 +208,11 @@ def test_run_scrape_failed_when_every_response_errors(monkeypatch):
     assert outcome.exit_code == 1
     assert outcome.errors == 1
     assert metrics[0]["status"] == "failed"
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
 def test_run_scrape_partial_when_progress_precedes_error(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
 
     class _PartiallyFailingScraper:
         def scrape(self, origin, dest, travel):
@@ -236,7 +230,7 @@ def test_run_scrape_partial_when_progress_precedes_error(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/secret",
+
         logger=logging.getLogger("t"),
         time_budget_s=3600,
     )
@@ -245,11 +239,11 @@ def test_run_scrape_partial_when_progress_precedes_error(monkeypatch):
     assert outcome.exit_code == 0
     assert outcome.errors == 1
     assert metrics[0]["status"] == "partial"
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
 def test_run_scrape_valid_empty_route_is_healthy_progress(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
 
     outcome = common.run_scrape(
         _FakeScraper(),
@@ -258,7 +252,7 @@ def test_run_scrape_valid_empty_route_is_healthy_progress(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/success",
+
         logger=logging.getLogger("t"),
         time_budget_s=3600,
     )
@@ -266,11 +260,11 @@ def test_run_scrape_valid_empty_route_is_healthy_progress(monkeypatch):
     assert outcome.status == "healthy"
     assert outcome.routes_zero == 1
     assert metrics[0]["status"] == "healthy"
-    assert heartbeats == ["https://heartbeat.invalid/success"]
+    assert metrics[0]["data_health_confirmed"] is True
 
 
-def test_run_scrape_valid_populated_route_pings_heartbeat(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+def test_run_scrape_valid_populated_route_confirms_data_health(monkeypatch):
+    metrics = _stub_io(monkeypatch)
     monkeypatch.setattr("pipeline.normalizer.filter_valid", lambda records: records)
     monkeypatch.setattr("pipeline.normalizer.stamp_expiry", lambda records, _tier: records)
     monkeypatch.setattr("pp_db.autocommit.upsert_flights", lambda records: len(records))
@@ -287,7 +281,7 @@ def test_run_scrape_valid_populated_route_pings_heartbeat(monkeypatch):
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/populated",
+
         logger=logging.getLogger("t"),
         time_budget_s=3600,
     )
@@ -295,11 +289,11 @@ def test_run_scrape_valid_populated_route_pings_heartbeat(monkeypatch):
     assert outcome.status == "healthy"
     assert outcome.records == 1
     assert metrics[0]["records"] == 1
-    assert heartbeats == ["https://heartbeat.invalid/populated"]
+    assert metrics[0]["data_health_confirmed"] is True
 
 
-def test_run_scrape_empty_on_demand_assignment_is_healthy_noop_without_heartbeat(monkeypatch):
-    metrics, heartbeats = _stub_io(monkeypatch)
+def test_run_scrape_empty_on_demand_does_not_confirm_data_health(monkeypatch):
+    metrics = _stub_io(monkeypatch)
 
     outcome = common.run_scrape(
         _FakeScraper(),
@@ -308,7 +302,7 @@ def test_run_scrape_empty_on_demand_assignment_is_healthy_noop_without_heartbeat
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/noop",
+
         logger=logging.getLogger("t"),
         time_budget_s=0,
     )
@@ -317,13 +311,13 @@ def test_run_scrape_empty_on_demand_assignment_is_healthy_noop_without_heartbeat
     assert outcome.routes_scraped == 0
     assert outcome.records == 0
     assert metrics[0]["status"] == "healthy"
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
-def test_run_scrape_empty_cron_queue_with_no_source_data_does_not_ping_heartbeat(monkeypatch):
+def test_run_scrape_empty_cron_queue_with_no_source_data_does_not_confirm_data_health(monkeypatch):
     import pipeline.queue_manager as queue_manager
 
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
 
     class _FakeQM:
         def __init__(self, scraper=None):
@@ -338,7 +332,7 @@ def test_run_scrape_empty_cron_queue_with_no_source_data_does_not_ping_heartbeat
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/cron-noop",
+
         logger=logging.getLogger("t"),
         route_jobs=[],
         time_budget_s=0,
@@ -347,13 +341,13 @@ def test_run_scrape_empty_cron_queue_with_no_source_data_does_not_ping_heartbeat
     assert outcome.status == "healthy"
     assert outcome.due_routes == 0
     assert metrics[0]["status"] == "healthy"
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
-def test_run_scrape_empty_cron_queue_with_unexpired_source_data_pings_heartbeat_once(monkeypatch):
+def test_run_scrape_empty_cron_queue_with_unexpired_source_data_confirms_data_health(monkeypatch):
     import pipeline.queue_manager as queue_manager
 
-    metrics, heartbeats = _stub_io(monkeypatch)
+    metrics = _stub_io(monkeypatch)
     freshness_calls = 0
 
     def fresh_snapshot(*_args, **_kwargs):
@@ -380,7 +374,7 @@ def test_run_scrape_empty_cron_queue_with_unexpired_source_data_pings_heartbeat_
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/fresh-idle",
+
         logger=logging.getLogger("t"),
         route_jobs=[],
         time_budget_s=0,
@@ -391,15 +385,15 @@ def test_run_scrape_empty_cron_queue_with_unexpired_source_data_pings_heartbeat_
     assert metrics[0]["jetblue_newest_age_h"] == 2.0
     assert metrics[0]["jetblue_unexpired_rows"] == 1
     assert freshness_calls == 1
-    assert heartbeats == ["https://heartbeat.invalid/fresh-idle"]
+    assert metrics[0]["data_health_confirmed"] is True
 
 
-def test_run_scrape_empty_cron_queue_with_recent_but_expired_data_skips_heartbeat(
+def test_run_scrape_empty_cron_queue_with_recent_but_expired_data_does_not_confirm_data_health(
     monkeypatch,
 ):
     import pipeline.queue_manager as queue_manager
 
-    metrics, heartbeats = _stub_io(
+    metrics = _stub_io(
         monkeypatch,
         {
             "jetblue_rows": 4,
@@ -421,7 +415,7 @@ def test_run_scrape_empty_cron_queue_with_recent_but_expired_data_skips_heartbea
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="https://heartbeat.invalid/expired-idle",
+
         logger=logging.getLogger("t"),
         route_jobs=[],
         time_budget_s=0,
@@ -429,7 +423,7 @@ def test_run_scrape_empty_cron_queue_with_recent_but_expired_data_skips_heartbea
 
     assert outcome.status == "healthy"
     assert metrics[0]["jetblue_unexpired_rows"] == 0
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
 
 
 def test_freshness_snapshot_counts_only_rows_expiring_after_database_now(monkeypatch):

@@ -24,7 +24,6 @@ import logging
 import os
 import sys
 import time
-import urllib.request
 from datetime import datetime, timezone
 
 from config.settings import (
@@ -34,7 +33,6 @@ from config.settings import (
     CASH_TOP_ROUTES,
     CASH_TTL_HOURS,
     CASH_ZERO_REPROBE_DAYS,
-    GFLIGHTS_HEARTBEAT_URL,
 )
 from pipeline.cash_matcher import match_cash_fares
 from pipeline.obs import flush_then_hard_exit, install_log_shipping, ship_cash_run
@@ -63,17 +61,6 @@ def _shard_config() -> tuple[int, int, int]:
     shard_index = int(os.getenv("CASH_SHARD_INDEX", "0"))
     run_budget_s = int(os.getenv("CASH_RUN_BUDGET_S", "5400"))  # default 90 min
     return shard_index, shard_count, run_budget_s
-
-
-def _ping_heartbeat() -> None:
-    """Ping the Better Stack heartbeat so a stalled run raises an alert (parity with the Fly
-    runner's heartbeat). No-op unless GFLIGHTS_HEARTBEAT_URL is set."""
-    if not GFLIGHTS_HEARTBEAT_URL:
-        return
-    try:
-        urllib.request.urlopen(GFLIGHTS_HEARTBEAT_URL, timeout=10).close()
-    except Exception as exc:  # noqa: BLE001 — monitoring must never break the run
-        logger.warning("heartbeat ping failed: %s", exc)
 
 
 def main() -> None:
@@ -160,7 +147,6 @@ def main() -> None:
         blocked=blocked,
         duration_s=duration_s,
     )
-    _ping_heartbeat()
     logger.info(
         "cash run done (shard %d/%d): %d fares (zero=%d failed=%d blocked=%s) in %ss",
         shard_index,
@@ -177,6 +163,6 @@ if __name__ == "__main__":
     main()
     # nodriver leaves a pending asyncio task after browser teardown that keeps the interpreter
     # alive, so the process never exits on its own and the GH-Actions step hangs until its
-    # timeout. main() has scraped, upserted, shipped its metric, and pinged the heartbeat by now,
+    # timeout. main() has scraped, upserted, shipped its metric, by now,
     # so flush briefly then hard-exit (same pattern as the award browser scrapes).
     flush_then_hard_exit(delay_s=3.0)

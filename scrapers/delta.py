@@ -182,7 +182,7 @@ class DeltaScraper(BrowserScraper):
     # Deliberately light cadence: refresh every 6h, small window, conservative pacing.
     min_delay_s = 12.0
     # Recovery probes issue one request; the first Akamai block must stop the run truthfully
-    # instead of becoming a valid-empty response and a false-success heartbeat.
+    # instead of becoming a valid-empty response and a incorrect healthy run.
     block_threshold = 1
     refresh_interval_min = 360  # 6 hours
     scrape_days_ahead = 21

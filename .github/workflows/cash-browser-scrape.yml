@@ -35,14 +35,14 @@ jobs:
         shard: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v6
+      - name: Install OTLP protobuf support if absent
+        run: python -c 'import opentelemetry.proto' || pip install -r requirements-telemetry.txt
       - name: Scrape Google Flights cash fares (headful Chrome under xvfb, Azure IP)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
-          BETTERSTACK_INGEST_URL: ${{ secrets.BETTERSTACK_INGEST_URL }}
-          BETTERSTACK_LOGS_TOKEN: ${{ secrets.BETTERSTACK_LOGS_TOKEN }}
-          BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
-          GFLIGHTS_HEARTBEAT_URL: ${{ secrets.GFLIGHTS_HEARTBEAT_URL }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+          OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
           CASH_SHARDS: "6"
           CASH_SHARD_INDEX: ${{ matrix.shard }}
           CASH_SCRAPE_DAYS: "45"

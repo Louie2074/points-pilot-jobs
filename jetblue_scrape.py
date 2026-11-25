@@ -16,8 +16,6 @@ import browser_scrape_common as common
 from config.settings import CRON_MAX_LEGS_PER_SHARD
 from pipeline.obs import flush_then_hard_exit
 
-JETBLUE_HEARTBEAT_URL = os.getenv("JETBLUE_HEARTBEAT_URL", "")
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -50,7 +48,7 @@ def _run_cron(shard_index: int, shards: int) -> common.ScrapeOutcome:
     return common.run_scrape(
         scraper, [], dates,
         source="jetblue", service="point-pilot-jetblue", airline="B6",
-        heartbeat_url=JETBLUE_HEARTBEAT_URL, logger=logger, route_jobs=route_jobs,
+        logger=logger, route_jobs=route_jobs,
     )
 
 

@@ -41,10 +41,8 @@ jobs:
       - name: Scrape and reconcile transfer bonuses
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BETTERSTACK_SOURCE_TOKEN: ${{ secrets.BETTERSTACK_SOURCE_TOKEN }}
-          BETTERSTACK_INGEST_URL: ${{ secrets.BETTERSTACK_INGEST_URL }}
-          BETTERSTACK_LOGS_TOKEN: ${{ secrets.BETTERSTACK_LOGS_TOKEN }}
-          BETTERSTACK_LOGS_INGEST_URL: ${{ secrets.BETTERSTACK_LOGS_INGEST_URL }}
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
+          OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
+          OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
           # Optional Better Stack heartbeat — a missed run then raises an alert. No-op if unset.
-          BONUSES_HEARTBEAT_URL: ${{ secrets.BONUSES_HEARTBEAT_URL }}
         run: python transfer_bonuses.py ${{ inputs.dry_run && '--dry-run' || '' }}

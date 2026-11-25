@@ -7,7 +7,7 @@ fetch — see ``scrapers/turkish.py``), normalizes, and upserts into Postgres ``
 exits. Manual workflow_dispatch or daily cron. Tunable via env: TURKISH_SCRAPE_DAYS (default 3);
 single-route on-demand mode via TURKISH_ROUTE_ORIGIN/DEST/DATES.
 
-The run plan + scrape loop + metric + heartbeat are shared — see ``browser_scrape_common.py``.
+The run plan + scrape loop + run event are shared — see ``browser_scrape_common.py``.
 """
 
 import logging
@@ -19,8 +19,6 @@ import browser_scrape_common as common
 from config.routes import TURKISH_MED_ROUTES
 from config.settings import CRON_MAX_LEGS_PER_SHARD
 from pipeline.obs import flush_then_hard_exit
-
-TURKISH_HEARTBEAT_URL = os.getenv("TURKISH_HEARTBEAT_URL", "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,7 +88,7 @@ def _run_cron(shard_index: int, shards: int) -> common.ScrapeOutcome:
     return common.run_scrape(
         TurkishScraper(), pairs, dates,
         source="turkish", service="point-pilot-turkish", airline="TK",
-        heartbeat_url=TURKISH_HEARTBEAT_URL, logger=logger, route_jobs=run_route_jobs,
+        logger=logger, route_jobs=run_route_jobs,
     )
 
 
@@ -119,7 +117,7 @@ def main() -> common.ScrapeOutcome:
         return common.run_scrape(
             TurkishScraper(), pairs, dates,
             source="turkish", service="point-pilot-turkish", airline="TK",
-            heartbeat_url=TURKISH_HEARTBEAT_URL, logger=logger,
+            logger=logger,
         )
     else:
         return _run_cron(SHARD_INDEX, SHARDS)

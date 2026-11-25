@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Deps ONLY — application code arrives at runtime via actions/checkout, so a code change
 # never needs an image rebuild (only requirements.txt / this Dockerfile do).
-COPY requirements.txt .
+COPY requirements.txt requirements-telemetry.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 ENV PYTHONUNBUFFERED=1

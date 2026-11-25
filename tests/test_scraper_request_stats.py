@@ -131,7 +131,7 @@ def test_run_scrape_reports_upstream_requests_without_database_cleanup(monkeypat
         source="delta",
         service="point-pilot-delta",
         airline="DL",
-        heartbeat_url="",
+
         logger=logging.getLogger("test-upstream-requests"),
     )
 

@@ -15,7 +15,7 @@ import pytest
 
 @pytest.fixture()
 def cbs(monkeypatch):
-    """Import the entrypoint fresh and neutralise log shipping + heartbeat for every test."""
+    """Import the entrypoint fresh and neutralise log shipping for every test."""
     mod = importlib.import_module("cash_browser_scrape")
     importlib.reload(mod)
     monkeypatch.setattr(mod, "install_log_shipping", lambda *a, **k: None)
@@ -187,15 +187,3 @@ def test_time_budget_stops_loop_cleanly(cbs, monkeypatch):
     assert scraper.calls == []
     assert state["metric"] is not None
     assert scraper.closed is True
-
-
-def test_heartbeat_pinged_when_url_set(cbs, monkeypatch):
-    pinged = {"url": None}
-    monkeypatch.setattr(cbs, "GFLIGHTS_HEARTBEAT_URL", "https://hb.example/x")
-    monkeypatch.setattr(cbs, "_ping_heartbeat", lambda: pinged.__setitem__("hit", True))
-    scraper = _FakeScraper(fares_per_call=1)
-    _wire(cbs, monkeypatch, scraper, _ROUTES)
-
-    cbs.main()
-
-    assert pinged.get("hit") is True

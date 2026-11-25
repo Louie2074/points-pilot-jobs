@@ -10,6 +10,7 @@ on:
     paths:
       - "Dockerfile.scraper"
       - "requirements.txt"
+      - "requirements-telemetry.txt"
       - ".github/workflows/build-scraper-image.yml"
   workflow_dispatch:
 

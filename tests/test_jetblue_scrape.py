@@ -43,7 +43,7 @@ def test_jetblue_canary_reports_first_waf_response_as_blocked(monkeypatch, statu
         source="jetblue",
         service="point-pilot-jetblue",
         airline="B6",
-        heartbeat_url="",
+
         logger=logging.getLogger("test-jetblue"),
     )
 
