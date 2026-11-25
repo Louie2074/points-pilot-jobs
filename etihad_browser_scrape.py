@@ -7,7 +7,7 @@ the rendered fare-selection cards (see ``scrapers/etihad.py``), normalizes, and 
 Postgres ``pp.flights``, then exits. Manual workflow_dispatch or daily cron. Tunable via env:
 ETIHAD_SCRAPE_DAYS (default 3); single-route on-demand mode via ETIHAD_ROUTE_ORIGIN/DEST/DATES.
 
-The run plan + scrape loop + metric + heartbeat are shared — see ``browser_scrape_common.py``.
+The run plan + scrape loop + run event are shared — see ``browser_scrape_common.py``.
 """
 
 import logging
@@ -18,8 +18,6 @@ from datetime import date
 import browser_scrape_common as common
 from config.settings import CRON_MAX_LEGS_PER_SHARD
 from pipeline.obs import flush_then_hard_exit
-
-ETIHAD_HEARTBEAT_URL = os.getenv("ETIHAD_HEARTBEAT_URL", "")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,7 +71,7 @@ def _run_cron(shard_index: int, shards: int) -> common.ScrapeOutcome:
     return common.run_scrape(
         EtihadScraper(), [], dates,
         source="etihad", service="point-pilot-etihad", airline="EY",
-        heartbeat_url=ETIHAD_HEARTBEAT_URL, logger=logger, route_jobs=route_jobs,
+        logger=logger, route_jobs=route_jobs,
     )
 
 
@@ -102,7 +100,7 @@ def main() -> common.ScrapeOutcome:
         return common.run_scrape(
             EtihadScraper(), pairs, dates,
             source="etihad", service="point-pilot-etihad", airline="EY",
-            heartbeat_url=ETIHAD_HEARTBEAT_URL, logger=logger,
+            logger=logger,
         )
     else:
         return _run_cron(SHARD_INDEX, SHARDS)

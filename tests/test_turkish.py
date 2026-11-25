@@ -339,7 +339,6 @@ def test_http_403_perimeterx_envelope_reports_blocked_run_without_secret_logs(mo
     )
     raw = _fetch_result(monkeypatch, wire)
     metrics = []
-    heartbeats = []
     scraper = TurkishScraper()
 
     monkeypatch.setattr(
@@ -351,7 +350,6 @@ def test_http_403_perimeterx_envelope_reports_blocked_run_without_secret_logs(mo
     monkeypatch.setattr("pipeline.obs.ship_metric", lambda metric: metrics.append(metric))
     monkeypatch.setattr(common, "freshness", lambda *args, **kwargs: {})
     monkeypatch.setattr("pp_db.autocommit.close_connection", lambda: None)
-    monkeypatch.setattr(common, "ping_heartbeat", lambda url, logger: heartbeats.append(url))
 
     with caplog.at_level(logging.WARNING):
         outcome = common.run_scrape(
@@ -361,7 +359,7 @@ def test_http_403_perimeterx_envelope_reports_blocked_run_without_secret_logs(mo
             source="turkish",
             service="point-pilot-turkish",
             airline="TK",
-            heartbeat_url="https://heartbeat.invalid/turkish",
+
             logger=logging.getLogger("test-turkish-block"),
         )
 
@@ -369,7 +367,7 @@ def test_http_403_perimeterx_envelope_reports_blocked_run_without_secret_logs(mo
     assert outcome.exit_code == 1
     assert metrics[0]["status"] == "blocked"
     assert metrics[0]["blocked"] is True
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False
     for value in secret_values:
         assert value not in caplog.text
 

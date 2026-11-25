@@ -39,7 +39,7 @@ noise; tests still run. CI uses Python 3.11.
 - `*_browser_scrape.py` (browser scrapers) + `alaska_scrape.py` / `jetblue_scrape.py` (httpx
   scrapers) — thin per-airline entrypoints (route list + `<AIRLINE>_*` env + Scraper class) calling
   **`browser_scrape_common.run_scrape()`**, which owns the run plan, scrape loop, `scrape_run`
-  metric, freshness snapshot, and heartbeat. (The module name is historical — the two httpx
+  event and freshness snapshot. (The module name is historical — the two httpx
   entrypoints reuse it too.) Don't duplicate that logic — extend the shared module.
 - `*_validate.py` — thin per-airline entrypoints (scraper factory + routes + watchdog) over
   **`validate_common.run_validation()`** — the no-DB, dispatch-only `workflow_dispatch` check that

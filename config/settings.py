@@ -61,14 +61,9 @@ FORCE_RESCRAPE_ON_START: bool = _get("FORCE_RESCRAPE_ON_START", "false").lower()
 # ---------------------------------------------------------------------------
 # Observability
 # ---------------------------------------------------------------------------
-# Better Stack heartbeat ping URL — the refresh job pings this after each run so
-# a dead scraper is detected (period 60m / grace 20m). Unset = no-op.
-SCRAPER_HEARTBEAT_URL: str = _get("SCRAPER_HEARTBEAT_URL", "")
-# Separate heartbeat for the Google Flights cash scraper (its own Fly app). Unset = no-op.
-GFLIGHTS_HEARTBEAT_URL: str = _get("GFLIGHTS_HEARTBEAT_URL", "")
 # Emit one structured `scrape_route` metric per route per run (records upserted,
 # dates covered/failed, per-cabin breakdown) so coverage gaps and per-route drops
-# are queryable in Better Stack. ON by default; set false to cut metric volume.
+# are queryable in Grafana. ON by default; set false to cut metric volume.
 SCRAPER_EMIT_ROUTE_METRICS: bool = _get("SCRAPER_EMIT_ROUTE_METRICS", "true").lower() in (
     "1",
     "true",

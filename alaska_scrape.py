@@ -17,8 +17,6 @@ import browser_scrape_common as common
 from config.settings import CRON_MAX_LEGS_PER_SHARD
 from pipeline.obs import flush_then_hard_exit
 
-ALASKA_HEARTBEAT_URL = os.getenv("ALASKA_HEARTBEAT_URL", "")
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -52,7 +50,7 @@ def _run_cron(shard_index: int, shards: int) -> common.ScrapeOutcome:
     return common.run_scrape(
         scraper, [], dates,
         source="alaska", service="point-pilot-alaska", airline="AS",
-        heartbeat_url=ALASKA_HEARTBEAT_URL, logger=logger, route_jobs=route_jobs,
+        logger=logger, route_jobs=route_jobs,
     )
 
 

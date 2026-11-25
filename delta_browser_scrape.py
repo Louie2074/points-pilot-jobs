@@ -8,7 +8,7 @@ for a manual workflow_dispatch or a cron. Tunable via env: DELTA_SCRAPE_DAYS (de
 single-route on-demand mode via DELTA_ROUTE_ORIGIN/DEST/DATES; cron sharding via DELTA_SHARDS /
 DELTA_SHARD_INDEX. While HTTP 444 persists, the scheduled workflow is a one-route recovery probe.
 
-The run plan + scrape loop + metric + heartbeat are shared — see ``browser_scrape_common.py``.
+The run plan + scrape loop + run event are shared — see ``browser_scrape_common.py``.
 """
 
 import logging
@@ -19,8 +19,6 @@ from datetime import date
 import browser_scrape_common as common
 from config.settings import CRON_MAX_LEGS_PER_SHARD
 from pipeline.obs import flush_then_hard_exit
-
-DELTA_HEARTBEAT_URL = os.getenv("DELTA_HEARTBEAT_URL", "")  # optional GH-Actions run heartbeat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,7 +82,7 @@ def _run_cron(shard_index: int, shards: int) -> common.ScrapeOutcome:
     return common.run_scrape(
         scraper, [], dates,
         source="delta", service="point-pilot-delta", airline="DL",
-        heartbeat_url=DELTA_HEARTBEAT_URL, logger=logger, route_jobs=route_jobs,
+        logger=logger, route_jobs=route_jobs,
     )
 
 
@@ -98,7 +96,7 @@ def main() -> common.ScrapeOutcome:
     from pipeline.obs import install_log_shipping
     from pp_db.autocommit import migrate
 
-    install_log_shipping("point-pilot-delta")  # ship WARNING+ logs to Better Stack
+    install_log_shipping("point-pilot-delta")
     migrate()  # idempotent; brings a fresh DB to the current schema version (no-op on prod)
     logger.info("Schema ready")
 
@@ -115,7 +113,7 @@ def main() -> common.ScrapeOutcome:
         return common.run_scrape(
             DeltaScraper(), pairs, dates,
             source="delta", service="point-pilot-delta", airline="DL",
-            heartbeat_url=DELTA_HEARTBEAT_URL, logger=logger,
+            logger=logger,
         )
     else:
         return _run_cron(SHARD_INDEX, SHARDS)
@@ -125,6 +123,5 @@ if __name__ == "__main__":
     outcome = main()
     # nodriver leaves a pending asyncio task (Connection.aclose) after browser teardown that keeps
     # the interpreter alive, so the process never exits on its own and the GitHub Actions step hangs
-    # until its timeout. main() has already scraped, upserted, shipped its metric, and pinged the
-    # heartbeat by this point, so flush briefly then hard-exit.
+    # until its timeout. Flush the run event before hard-exiting.
     flush_then_hard_exit(outcome.exit_code, delay_s=3.0)

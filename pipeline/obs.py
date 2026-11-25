@@ -1,28 +1,4 @@
-"""Best-effort metric + log shipping to Better Stack via direct HTTPS POST.
-
-Two channels, two sources:
-  - METRICS: structured JSON events (ship_metric / ship_metrics) → the metrics source
-    (BETTERSTACK_SOURCE_TOKEN). Unchanged wire format; feeds dashboards.
-  - LOGS: raw single-line strings (ship_log) → a separate logs source
-    (BETTERSTACK_LOGS_TOKEN). Each log is {dt, message} only — no structured columns —
-    so the Better Stack logs view reads as plain lines.
-
-Self-contained copy of the scraper/api `obs.py`, adapted for short-lived cron jobs.
-The scraper is a long-running process, so it fires each POST on a daemon thread and
-forgets it. A cron job exits in seconds and would kill those threads mid-request — so
-POST threads are tracked here and `flush()` drains them before the process exits. Call
-`flush()` once, last thing, in a finally.
-
-No-op unless the relevant token is set. Never raises and never blocks the caller.
-
-Env:
-  BETTERSTACK_SOURCE_TOKEN   — metrics source ingest token (enables ship_metric[s])
-  BETTERSTACK_INGEST_URL     — metrics ingest host (defaults to the classic Logs endpoint)
-  BETTERSTACK_LOGS_TOKEN     — logs source ingest token (enables ship_log + log shipping)
-  BETTERSTACK_LOGS_INGEST_URL— logs ingest host (defaults to the classic Logs endpoint;
-                               set to the source-specific host for region sources)
-  BETTERSTACK_LOG_LEVEL      — min level forwarded by install_log_shipping (default WARNING)
-"""
+"""Best-effort operational events and logs over OTLP/HTTP to Grafana Cloud."""
 
 from __future__ import annotations
 
@@ -31,153 +7,201 @@ import logging
 import os
 import threading
 import time
-import urllib.request
-from datetime import datetime, timezone
+from urllib.parse import unquote
+
+import httpx
+from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_URL = "https://in.logs.betterstack.com"
-_threads: list[threading.Thread] = []
+_threads: set[threading.Thread] = set()
+_threads_lock = threading.Lock()
 
 _BENIGN_PATTERNS = (
     "Task was destroyed but it is pending",  # nodriver Connection.aclose teardown
     "blake2",  # hashlib blake2b/blake2s import noise on some Python builds
 )
-
 _LEVEL_ABBR = {"WARNING": "WARN"}
+_SEVERITY_NUMBERS = {10: 5, 20: 9, 30: 13, 40: 17, 50: 21}
 
 
-def _post(url: str, token: str, body: bytes) -> None:
-    """POST one body to a Better Stack source on a TRACKED daemon thread so flush()
-    can drain it before a short-lived cron exits."""
+def _log_target() -> tuple[str, dict[str, str]] | None:
+    protocol = (
+        os.getenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL")
+        or os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+        or "http/protobuf"
+    )
+    if protocol != "http/protobuf":
+        return None
 
-    def _run() -> None:
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    raw_headers = (
+        os.getenv("OTEL_EXPORTER_OTLP_LOGS_HEADERS")
+        or os.getenv("OTEL_EXPORTER_OTLP_HEADERS")
+        or ""
+    )
+    if not (endpoint or base) or not raw_headers.strip():
+        return None
+
+    headers = {"Content-Type": "application/x-protobuf"}
+    for pair in raw_headers.split(","):
+        name, separator, value = pair.partition("=")
+        if separator and name.strip() and value.strip():
+            if name.strip().lower() != "content-type":
+                headers[name.strip()] = unquote(value.strip())
+    if len(headers) == 1:
+        return None
+
+    try:
+        url = httpx.URL(endpoint or base)
+    except httpx.InvalidURL:
+        return None
+    if url.scheme not in ("http", "https") or not url.host:
+        return None
+    if not endpoint:
+        url = url.copy_with(path=f"{url.path.rstrip('/')}/v1/logs")
+    return str(url), headers
+
+
+def _post(url: str, headers: dict[str, str], body: bytes) -> None:
+    def send() -> None:
         try:
-            req = urllib.request.Request(
-                url,
-                data=body,
-                headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=5).close()
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("better stack POST failed: %s", exc)
+            httpx.post(url, headers=headers, content=body, timeout=3).raise_for_status()
+        except Exception:
+            # The export should never affect request processing or expose credentials.
+            logger.debug("OTLP log export failed")
+        finally:
+            with _threads_lock:
+                _threads.discard(threading.current_thread())
 
-    t = threading.Thread(target=_run, daemon=True)
-    _threads.append(t)
-    t.start()
+    thread = threading.Thread(target=send, daemon=True)
+    with _threads_lock:
+        _threads.add(thread)
+        try:
+            thread.start()
+        except RuntimeError:
+            _threads.discard(thread)
+            logger.debug("Could not start OTLP log export")
+
+
+def _ship_records(records: list[tuple[str, str, int]], target: tuple[str, dict[str, str]]) -> None:
+    request = ExportLogsServiceRequest()
+    scope_by_service = {}
+    configured_service = os.getenv("OTEL_SERVICE_NAME")
+    timestamp = time.time_ns()
+    for service, body, level in records:
+        service = configured_service or service
+        if service not in scope_by_service:
+            resource = request.resource_logs.add()
+            attribute = resource.resource.attributes.add(key="service.name")
+            attribute.value.string_value = service
+            scope = resource.scope_logs.add()
+            scope.scope.name = "point-pilot"
+            scope_by_service[service] = scope
+        severity = logging.getLevelName(level)
+        record = scope_by_service[service].log_records.add(
+            time_unix_nano=timestamp,
+            severity_text=_LEVEL_ABBR.get(severity, severity),
+            severity_number=_SEVERITY_NUMBERS.get(level, 0),
+        )
+        record.body.string_value = body
+    url, headers = target
+    _post(url, headers, request.SerializeToString())
 
 
 def ship_metric(fields: dict) -> None:
-    """Fire one structured event at the Better Stack METRICS source. Best-effort."""
+    """Ship one structured operational event as a JSON log body."""
     ship_metrics([fields])
 
 
 def ship_metrics(events: list[dict]) -> None:
-    """Fire a batch of structured events at the Better Stack METRICS source in one POST.
-
-    Better Stack's ingest accepts a JSON array, so N per-route events cost one request.
-    A single event is sent as a bare object. No-op without BETTERSTACK_SOURCE_TOKEN. Each
-    POST runs on a tracked daemon thread that `flush()` can drain."""
-    token = os.getenv("BETTERSTACK_SOURCE_TOKEN")
-    if not token or not events:
+    """Ship a batch of structured events in one OTLP logs request."""
+    target = _log_target()
+    if not target or not events:
         return
-    url = os.getenv("BETTERSTACK_INGEST_URL") or _DEFAULT_URL
-    now = datetime.now(timezone.utc).isoformat()
-    stamped = [{"dt": now, **e} for e in events]
-    body = json.dumps(stamped[0] if len(stamped) == 1 else stamped).encode()
-    _post(url, token, body)
+    try:
+        records = [
+            (str(event.get("service") or "point-pilot-jobs"), json.dumps(event), logging.INFO)
+            for event in events
+        ]
+        _ship_records(records, target)
+    except Exception:
+        logger.debug("Could not encode OTLP log batch")
 
 
-def ship_log(message: str) -> None:
-    """Ship one raw-string log line to the Better Stack LOGS source as {dt, message}.
-    Best-effort; no-op without BETTERSTACK_LOGS_TOKEN."""
-    token = os.getenv("BETTERSTACK_LOGS_TOKEN")
-    if not token:
+def ship_log(
+    message: str, *, service: str = "point-pilot-jobs", level: int = logging.INFO
+) -> None:
+    """Ship one plain-text log with its service and severity."""
+    target = _log_target()
+    if not target:
         return
-    url = os.getenv("BETTERSTACK_LOGS_INGEST_URL", _DEFAULT_URL)
-    body = json.dumps({"dt": datetime.now(timezone.utc).isoformat(), "message": message}).encode()
-    _post(url, token, body)
+    try:
+        _ship_records([(service, message, level)], target)
+    except Exception:
+        logger.debug("Could not encode OTLP log record")
 
 
 def flush(timeout: float = 5.0) -> None:
-    """Wait (up to `timeout` total) for in-flight POSTs to finish, so a short-lived
-    process doesn't exit and kill a daemon POST thread mid-request."""
+    """Give in-flight exports a bounded chance to finish before process exit."""
     deadline = time.monotonic() + timeout
-    for t in list(_threads):
-        t.join(max(0.0, deadline - time.monotonic()))
+    with _threads_lock:
+        threads = tuple(_threads)
+    for thread in threads:
+        thread.join(max(0.0, deadline - time.monotonic()))
 
 
 def flush_then_hard_exit(code: int = 0, *, delay_s: float = 0.0) -> None:
-    """Flush Better Stack POST threads before hard-exiting scraper entrypoints.
-
-    Some browser libraries leave non-daemon teardown tasks alive after successful scrapes.
-    The scraper entrypoints intentionally hard-exit to avoid hanging GitHub Actions jobs, but
-    metrics/logs are shipped on daemon threads and can be lost unless they are flushed first.
-    """
+    """Flush telemetry before exiting browser entrypoints with pending teardown tasks."""
     if delay_s > 0:
         time.sleep(delay_s)
     flush()
     os._exit(code)
 
 
-def _format_record(service: str, record: logging.LogRecord, identity: dict | None = None) -> str:
-    """One raw log line: '<LEVEL> <service> [<logger>] <message>' (+ ' (k=v …)' identity,
-    + folded traceback)."""
+def _format_record(service: str, record: logging.LogRecord) -> str:
     level = _LEVEL_ABBR.get(record.levelname, record.levelname)
     line = f"{level} {service} [{record.name}] {record.getMessage()}"
-    if identity:
-        ident = " ".join(f"{k}={v}" for k, v in identity.items() if v is not None)
-        if ident:
-            line += f" ({ident})"
     if record.exc_info:
         line += "\n" + logging.Formatter().formatException(record.exc_info)
     return line
 
 
 class _BenignNoiseFilter(logging.Filter):
-    """Drop known library-internal teardown noise (nodriver pending-task, hashlib blake2)
-    so it never reaches Better Stack. App-level warnings/errors pass through."""
-
     def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
-        return not any(p in msg for p in _BENIGN_PATTERNS)
+        return not any(pattern in record.getMessage() for pattern in _BENIGN_PATTERNS)
 
 
-class _BetterStackLogHandler(logging.Handler):
-    """Forwards log records (with tracebacks) to the Better Stack LOGS source as raw strings."""
-
+class _OtlpLogHandler(logging.Handler):
     def __init__(self, service: str, level: int) -> None:
         super().__init__(level)
         self._service = service
 
     def emit(self, record: logging.LogRecord) -> None:
-        if record.name == __name__:  # loop guard — never ship our own POST-failure logs
+        if record.name == __name__:
             return
         try:
-            ship_log(_format_record(self._service, record))
-        except Exception:  # logging must never crash the app
+            ship_log(
+                _format_record(self._service, record), service=self._service, level=record.levelno
+            )
+        except Exception:
+            # A malformed library log record must not crash the application.
             pass
 
 
 def install_log_shipping(service: str) -> None:
-    """Attach a root-logger handler that POSTs logs to the Better Stack LOGS source as raw
-    strings, plus a benign-noise filter. No-op unless a Better Stack token is set. Threshold
-    via BETTERSTACK_LOG_LEVEL (default WARNING; set INFO to forward everything)."""
-    if not (os.getenv("BETTERSTACK_LOGS_TOKEN") or os.getenv("BETTERSTACK_SOURCE_TOKEN")):
+    """Forward WARNING+ logs to Grafana, with a configurable forwarding threshold."""
+    if not _log_target():
         return
-    level = getattr(logging, os.getenv("BETTERSTACK_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
+    level = getattr(logging, os.getenv("POINT_PILOT_LOG_LEVEL", "WARNING").upper(), logging.WARNING)
     root = logging.getLogger()
-    if any(isinstance(h, _BetterStackLogHandler) for h in root.handlers):
+    if any(isinstance(handler, _OtlpLogHandler) for handler in root.handlers):
         return
-    handler = _BetterStackLogHandler(service, level)
-    # The benign noise (nodriver teardown, blake2) is emitted by library loggers like `asyncio`
-    # and PROPAGATES up to this handler. A filter on the root *logger* is only consulted for
-    # records logged directly on root — never for propagated ones — so it must live on the
-    # HANDLER to actually drop the noise before it ships.
+    handler = _OtlpLogHandler(service, level)
     handler.addFilter(_BenignNoiseFilter())
     root.addHandler(handler)
-    ship_log(f"INFO {service} [obs] started — direct log shipping enabled")
+    ship_log(f"INFO {service} [obs] started — OTLP log shipping enabled", service=service)
 
 
 def ship_cash_run(
@@ -189,11 +213,16 @@ def ship_cash_run(
     blocked: bool,
     duration_s: float | None = None,
     freshness: dict | None = None,
+    coverage: dict | None = None,
+    selection: dict | None = None,
+    cpp_coverage: dict | None = None,
 ) -> None:
     """Emit a `cash_run` event for the Google Flights cash scraper (no-op without a token).
 
     Mirrors the award scraper's `scrape_run` shape (event + service + counts + duration +
-    data-freshness snapshot) so both scrapers chart the same way in Better Stack."""
+    data-freshness snapshot) so both scrapers chart the same way in Grafana. `coverage`
+    carries the cash-coverage-lag fields (award_routes / cash_covered_routes / coverage_pct).
+    `cpp_coverage` carries exact_cpp_coverage_pct / od_cpp_coverage_pct / cpp_total_rows."""
     payload = {
         "event": "cash_run",
         "service": "point-pilot-gflights",
@@ -207,4 +236,10 @@ def ship_cash_run(
         payload["duration_s"] = duration_s
     if freshness:
         payload.update(freshness)
+    if coverage:
+        payload.update(coverage)
+    if selection:
+        payload.update(selection)
+    if cpp_coverage:
+        payload.update(cpp_coverage)
     ship_metric(payload)

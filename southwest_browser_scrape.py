@@ -8,7 +8,7 @@ Postgres ``pp.flights``, then exits. Suitable for a manual workflow_dispatch or 
 env: SOUTHWEST_SCRAPE_DAYS (default 5); single-route on-demand mode via
 SOUTHWEST_ROUTE_ORIGIN/DEST/DATES.
 
-The run plan + scrape loop + metric + heartbeat are shared — see ``browser_scrape_common.py``.
+The run plan + scrape loop + run event are shared — see ``browser_scrape_common.py``.
 """
 
 import logging
@@ -19,8 +19,6 @@ from datetime import date
 import browser_scrape_common as common
 from config.settings import CRON_MAX_LEGS_PER_SHARD
 from pipeline.obs import flush_then_hard_exit
-
-SOUTHWEST_HEARTBEAT_URL = os.getenv("SOUTHWEST_HEARTBEAT_URL", "")  # optional GH-Actions heartbeat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -83,7 +81,7 @@ def _run_cron(shard_index: int, shards: int) -> common.ScrapeOutcome:
     return common.run_scrape(
         scraper, [], dates,
         source="southwest", service="point-pilot-southwest", airline="WN",
-        heartbeat_url=SOUTHWEST_HEARTBEAT_URL, logger=logger, route_jobs=route_jobs,
+        logger=logger, route_jobs=route_jobs,
     )
 
 
@@ -114,7 +112,7 @@ def main() -> common.ScrapeOutcome:
         return common.run_scrape(
             SouthwestScraper(), pairs, dates,
             source="southwest", service="point-pilot-southwest", airline="WN",
-            heartbeat_url=SOUTHWEST_HEARTBEAT_URL, logger=logger,
+            logger=logger,
         )
     else:
         return _run_cron(SHARD_INDEX, SHARDS)

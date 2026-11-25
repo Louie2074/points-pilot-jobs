@@ -257,10 +257,9 @@ def test_normalize_null_response_returns_empty(raw):
     assert recs == []
 
 
-def test_single_444_response_reports_blocked_without_success_heartbeat(monkeypatch):
+def test_single_444_response_reports_blocked_without_confirming_data_health(monkeypatch):
     scraper = DeltaScraper()
     metrics = []
-    heartbeats = []
 
     async def fake_ensure_browser():
         return object()
@@ -273,9 +272,6 @@ def test_single_444_response_reports_blocked_without_success_heartbeat(monkeypat
     monkeypatch.setattr("pipeline.obs.ship_metric", lambda metric: metrics.append(metric))
     monkeypatch.setattr(common, "freshness", lambda *args, **kwargs: {})
     monkeypatch.setattr("pp_db.autocommit.close_connection", lambda: None)
-    monkeypatch.setattr(
-        common, "ping_heartbeat", lambda url, logger: heartbeats.append(url)
-    )
 
     outcome = common.run_scrape(
         scraper,
@@ -284,7 +280,7 @@ def test_single_444_response_reports_blocked_without_success_heartbeat(monkeypat
         source="delta",
         service="point-pilot-delta",
         airline="DL",
-        heartbeat_url="https://heartbeat.invalid/delta",
+
         logger=logging.getLogger("test-delta-block"),
     )
 
@@ -293,4 +289,4 @@ def test_single_444_response_reports_blocked_without_success_heartbeat(monkeypat
     assert scraper._consecutive_blocks == 1
     assert metrics[0]["status"] == "blocked"
     assert metrics[0]["blocked"] is True
-    assert heartbeats == []
+    assert metrics[0]["data_health_confirmed"] is False

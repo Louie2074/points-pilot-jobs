@@ -19,7 +19,7 @@ stores tz-aware local departure/arrival times (a naive value would land in the T
 column as UTC, shifting every time by the airport's offset). Re-sync if it changes upstream.
 
 `pipeline/obs.py` is a copy of the scraper repo's (canonical there) — it gives each browser scrape
-Better Stack log shipping + a `scrape_run` metric (per-airline service `point-pilot-delta` /
+Grafana OTLP log shipping and a `scrape_run` event (per-airline service `point-pilot-delta` /
 `-southwest` / `-turkish` / `-etihad`, set in each `*_browser_scrape.py`) at parity with the
 Alaska/JetBlue + Google Flights scrapers. Re-sync if it changes upstream.
 

@@ -2,8 +2,7 @@
 etihad ``*_browser_scrape.py``).
 
 Each entrypoint is a thin config (its route list, ``<AIRLINE>_*`` env vars, and its Scraper class);
-the run plan, the scrape loop, the Better Stack metric, the freshness snapshot, and the heartbeat
-ping are identical across all of them and live here. To add a new no-login airline scraper you
+the run plan, scrape loop, and Grafana run events live here. To add a new no-login airline,
 write ``scrapers/<airline>.py`` (a BrowserScraper subclass) and a ~40-line entrypoint that calls
 ``run_scrape()`` — see ``etihad_browser_scrape.py`` as the reference, and ``CLAUDE.md`` for the
 full onboarding playbook.
@@ -17,14 +16,13 @@ from __future__ import annotations
 import logging
 import os
 import time
-import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 # Wall-clock budget for a single cron run. The shared scrape loop stops cleanly between routes
 # once this is reached so a long shard (AS/B6) can never overrun the GitHub-Actions 60-minute job
-# cap and get hard-cancelled mid-run (which drops the scrape_run metric + heartbeat and leaves
+# cap and get hard-cancelled mid-run (which drops the scrape_run event and leaves
 # in-flight routes unmarked). Routes not reached simply stay due for the next run. 45 min leaves
 # ~15 min of headroom under the 60-min workflow timeout.
 DEFAULT_CRON_TIME_BUDGET_S = 2700.0
@@ -172,21 +170,11 @@ def build_queue_plan(
     return mine, dates
 
 
-def ping_heartbeat(url: str, logger: logging.Logger) -> None:
-    """Ping a Better Stack/uptime heartbeat URL (no-op if unset). Monitoring must never break it."""
-    if not url:
-        return
-    try:
-        urllib.request.urlopen(url, timeout=10).close()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("heartbeat ping failed: %s", exc)
-
-
 def freshness(source: str, logger: logging.Logger) -> dict:
     """Bounded source-row freshness snapshot for the metric. Best-effort/no-raise.
 
     The existing total-row and newest-age fields remain stable for dashboards. The unexpired-row
-    count is the authoritative idle-heartbeat signal because source TTLs vary per stamped row.
+    count is the authoritative idle data health signal because source TTLs vary per stamped row.
     """
     try:
         from sqlalchemy import text
@@ -242,13 +230,12 @@ def run_scrape(
     source: str,
     service: str,
     airline: str,
-    heartbeat_url: str,
     logger: logging.Logger,
     route_jobs=None,
     time_budget_s: float | None = None,
 ) -> ScrapeOutcome:
     """Run the scrape loop (every route × date), upsert valid+stamped rows, then ship the
-    ``scrape_run`` metric + heartbeat. Aborts the run after the scraper raises ScraperBlockedError
+    ``scrape_run`` event. Aborts the run after the scraper raises ScraperBlockedError
     (rows already upserted persist). Always tears the scraper + DB connection down. Returns the
     structured outcome used by entrypoints to choose their final process exit code.
 
@@ -420,6 +407,11 @@ def run_scrape(
 
     duration_s = round(time.monotonic() - started, 1)
     freshness_snapshot = freshness(source, logger)
+    # A healthy process alone does not prove ingestion health. Preserve the
+    # validation signal on the run event so Grafana can alert on missing runs.
+    data_health_confirmed = status == "healthy" and (
+        routes_with_progress > 0 or _has_fresh_source_data(freshness_snapshot, source)
+    )
     ship_metric(
         {
             "event": "scrape_run",
@@ -439,19 +431,13 @@ def run_scrape(
             "blocked_airline": blocked_airline,
             "blocked_backoff_min": blocked_backoff_min,
             "status": status,
+            "data_health_confirmed": data_health_confirmed,
             "queue_selected_routes": queue_selected_routes,
             "queue_left_due_estimate": queue_left_due_estimate,
             "queue_fill_ratio": queue_fill_ratio,
             **freshness_snapshot,
         }
     )
-    # A healthy process is not enough to claim ingestion health. Ping only after this run validated
-    # at least one response (including valid-empty), or when the same bounded metric snapshot proves
-    # that the source already has at least one row whose stamped expiry is still in the future.
-    if status == "healthy" and (
-        routes_with_progress > 0 or _has_fresh_source_data(freshness_snapshot, source)
-    ):
-        ping_heartbeat(heartbeat_url, logger)
     logger.info(
         "=== done — status=%s %d %s records "
         "(routes=%d unchanged=%d errors=%d blocked=%s) in %ss ===",

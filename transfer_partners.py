@@ -14,7 +14,7 @@ Fail-closed: HTTP non-2xx or "no managed bank tables found at all" raises → no
 exit → workflow failure. A bank section that maps to zero rows just contributes
 nothing (pure snapshot).
 
-Requires DATABASE_URL (Postgres). BETTERSTACK_SOURCE_TOKEN enables metrics/log shipping.
+Requires DATABASE_URL (Postgres). Optional OTLP settings enable Grafana Cloud telemetry.
 """
 
 from __future__ import annotations
@@ -32,13 +32,11 @@ import nodriver as uc
 from bs4 import BeautifulSoup
 from sqlalchemy import Connection, text
 
-from obs import flush, install_log_shipping, ping_heartbeat, ship_metric
+from pipeline.obs import flush, install_log_shipping, ship_metric
 from pp_db import queries as pq
 
 logger = logging.getLogger("transfer_partners")
 
-# Optional Better Stack heartbeat — a missed run then raises an alert. No-op unless set.
-PARTNERS_HEARTBEAT_URL = os.getenv("TRANSFER_PARTNERS_HEARTBEAT_URL", "")
 
 SOURCE_URL = "https://thriftytraveler.com/guides/points/credit-card-transfer-partners/"
 
@@ -491,9 +489,6 @@ def main() -> int:
             }
         )
         flush()
-        # Heartbeat only on a successful real run (dry-runs are manual).
-        if ok and not args.dry_run:
-            ping_heartbeat(PARTNERS_HEARTBEAT_URL, logger)
 
 
 if __name__ == "__main__":
